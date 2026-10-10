@@ -58,29 +58,44 @@ function StatusActions({
     colors: ColorScheme
 }) {
     return (
-        <View style={s.statusRow}>
+        <View style={[s.statusRow, { borderTopColor: colors.border }]}>
             {currentStatus === 'unread' && (
                 <>
                     <Pressable
                         onPress={() => onSetStatus('read_liked')}
-                        style={[s.statusBtn, { backgroundColor: '#E8F5E9', borderColor: '#C8E6C9' }]}
+                        accessibilityLabel="Beğendim olarak işaretle"
+                        accessibilityRole="button"
+                        style={({ pressed }) => [
+                            s.statusBtn,
+                            { opacity: pressed ? 0.6 : 1 },
+                        ]}
                     >
-                        <Ionicons name="thumbs-up-outline" size={14} color="#2E7D32" />
-                        <Text style={[s.statusBtnText, { color: '#2E7D32' }]}>Beğendim</Text>
+                        <Ionicons name="thumbs-up-outline" size={14} color={colors.muted} />
+                        <Text style={[s.statusBtnText, { color: colors.muted }]}>Beğendim</Text>
                     </Pressable>
                     <Pressable
                         onPress={() => onSetStatus('read_disliked')}
-                        style={[s.statusBtn, { backgroundColor: '#FFEBEE', borderColor: '#FFCDD2' }]}
+                        accessibilityLabel="Beğenmedim olarak işaretle"
+                        accessibilityRole="button"
+                        style={({ pressed }) => [
+                            s.statusBtn,
+                            { opacity: pressed ? 0.6 : 1 },
+                        ]}
                     >
-                        <Ionicons name="thumbs-down-outline" size={14} color="#C62828" />
-                        <Text style={[s.statusBtnText, { color: '#C62828' }]}>Beğenmedim</Text>
+                        <Ionicons name="thumbs-down-outline" size={14} color={colors.muted} />
+                        <Text style={[s.statusBtnText, { color: colors.muted }]}>Beğenmedim</Text>
                     </Pressable>
                 </>
             )}
             {currentStatus === 'read_liked' && (
                 <Pressable
                     onPress={() => onSetStatus('unread')}
-                    style={[s.statusBtn, { backgroundColor: colors.abstractBg, borderColor: colors.border }]}
+                    accessibilityLabel="Sonra oku olarak işaretle"
+                    accessibilityRole="button"
+                    style={({ pressed }) => [
+                        s.statusBtn,
+                        { opacity: pressed ? 0.6 : 1 },
+                    ]}
                 >
                     <Ionicons name="arrow-undo-outline" size={14} color={colors.muted} />
                     <Text style={[s.statusBtnText, { color: colors.muted }]}>Sonra Oku'ya taşı</Text>
@@ -89,7 +104,12 @@ function StatusActions({
             {currentStatus === 'read_disliked' && (
                 <Pressable
                     onPress={() => onSetStatus('unread')}
-                    style={[s.statusBtn, { backgroundColor: colors.abstractBg, borderColor: colors.border }]}
+                    accessibilityLabel="Sonra oku olarak işaretle"
+                    accessibilityRole="button"
+                    style={({ pressed }) => [
+                        s.statusBtn,
+                        { opacity: pressed ? 0.6 : 1 },
+                    ]}
                 >
                     <Ionicons name="arrow-undo-outline" size={14} color={colors.muted} />
                     <Text style={[s.statusBtnText, { color: colors.muted }]}>Sonra Oku'ya taşı</Text>
@@ -101,16 +121,16 @@ function StatusActions({
 
 // ── Status indicator badge ───────────────────────────────────────────────────
 
-function StatusBadge({ status }: { status: ReadingStatus }) {
+function StatusBadge({ status, colors }: { status: ReadingStatus; colors: ColorScheme }) {
     if (status === 'unread') return null
     const liked = status === 'read_liked'
     const config = liked
-        ? { icon: 'thumbs-up-outline' as const, bg: '#E8F5E9', color: '#2E7D32', label: 'Beğenildi' }
-        : { icon: 'thumbs-down-outline' as const, bg: '#FFEBEE', color: '#C62828', label: 'Beğenilmedi' }
+        ? { icon: 'thumbs-up-outline' as const, label: 'Beğenildi' }
+        : { icon: 'thumbs-down-outline' as const, label: 'Beğenilmedi' }
     return (
-        <View style={[s.statusBadge, { backgroundColor: config.bg }]}>
-            <Ionicons name={config.icon} size={10} color={config.color} />
-            <Text style={[s.statusBadgeText, { color: config.color }]}>{config.label}</Text>
+        <View style={s.statusBadge}>
+            <Ionicons name={config.icon} size={10} color={colors.muted} />
+            <Text style={[s.statusBadgeText, { color: colors.muted }]}>{config.label}</Text>
         </View>
     )
 }
@@ -309,7 +329,7 @@ export default function SavedScreen({
                                             <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 }}>
                                                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                                                     <SourceBadge source={entry.article.source} />
-                                                    <StatusBadge status={entry.status} />
+                                                    <StatusBadge status={entry.status} colors={colors} />
                                                 </View>
                                                 <Pressable
                                                     onPress={() => confirmDelete(
@@ -360,7 +380,7 @@ export default function SavedScreen({
                                                 <View style={[s.badge, { backgroundColor: '#E8F5E9' }]}>
                                                     <Text style={[s.badgeText, { color: EA_GREEN }]}>Evrim Ağacı</Text>
                                                 </View>
-                                                <StatusBadge status={entry.status} />
+                                                <StatusBadge status={entry.status} colors={colors} />
                                             </View>
                                             <Pressable
                                                 onPress={() => confirmDelete(
@@ -410,7 +430,7 @@ export default function SavedScreen({
                                                 <View style={[s.badge, { backgroundColor: '#FFF3E0' }]}>
                                                     <Text style={[s.badgeText, { color: HN_ORANGE }]}>HN</Text>
                                                 </View>
-                                                <StatusBadge status={entry.status} />
+                                                <StatusBadge status={entry.status} colors={colors} />
                                             </View>
                                             <Pressable
                                                 onPress={() => confirmDelete(
@@ -571,33 +591,30 @@ const s = StyleSheet.create({
         marginTop: 10,
         paddingTop: 10,
         borderTopWidth: StyleSheet.hairlineWidth,
-        borderTopColor: '#E0E0E0',
     },
+    // Arka plan olmadan yalnızca ikon + etiket. Tema körümüş pastel bloklar
+    // koyu temada sert durduğu için kaldırıldı; renk colors.muted ile
+    // "Henüz kayıtlı makale yok" metniyle aynı tonda.
     statusBtn: {
         flex: 1,
         flexDirection: 'row',
         gap: 6,
-        borderWidth: 1,
-        borderRadius: 8,
-        paddingVertical: 9,
+        paddingVertical: 7,
         alignItems: 'center',
         justifyContent: 'center',
     },
     statusBtnText: {
-        fontFamily: SANS_SEMIBOLD,
+        fontFamily: SANS_MEDIUM,
         fontSize: 12,
     },
     statusBadge: {
         flexDirection: 'row',
         alignItems: 'center',
         gap: 4,
-        paddingHorizontal: 6,
-        paddingVertical: 3,
-        borderRadius: 4,
     },
     statusBadgeText: {
-        fontFamily: SANS_SEMIBOLD,
-        fontSize: 9,
+        fontFamily: SANS_MEDIUM,
+        fontSize: 10,
         letterSpacing: 0.3,
     },
     sectionHead: {

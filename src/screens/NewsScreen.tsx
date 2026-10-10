@@ -46,7 +46,7 @@ export default function NewsScreen({
 }: {
     colors: ColorScheme
     onOpenUrl: (url: string, title: string) => void
-    onSearch: (q: string) => void
+    onSearch: (q: string, mode?: 'academic' | 'news') => void
     onOpenMenu: () => void
 }) {
     const [articles, setArticles] = useState<NewsArticle[]>([])
@@ -88,7 +88,7 @@ export default function NewsScreen({
 
     const submitSearch = () => {
         const q = query.trim()
-        if (q) onSearch(q)
+        if (q) onSearch(q, 'news')
     }
 
     const filteredArticles = activeFilter === 'all'
@@ -134,7 +134,7 @@ export default function NewsScreen({
                         onBlur={() => setFocused(false)}
                         onSubmitEditing={submitSearch}
                         returnKeyType="search"
-                        placeholder="Akademik makale ara..."
+                        placeholder="Haberlerde ara..."
                         placeholderTextColor={colors.mutedLight}
                         style={[s.searchInput, { color: colors.ink }]}
                     />
@@ -162,8 +162,8 @@ export default function NewsScreen({
                         {selectedTopics.map((topic) => (
                             <Pressable
                                 key={topic}
-                                onPress={() => onSearch(topic)}
-                                accessibilityLabel={`${topic} konusunda ara`}
+                                onPress={() => onSearch(topic, 'academic')}
+                                accessibilityLabel={`${topic} konusunda akademik makale ara`}
                                 accessibilityRole="button"
                                 style={[s.topicChip, { borderColor: colors.inputBorder }]}
                             >

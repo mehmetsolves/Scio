@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import {
     View,
     Text,
+    TextInput,
     Pressable,
     ScrollView,
     StyleSheet,
@@ -16,9 +17,11 @@ import { useDownloads } from '../store/DownloadsContext'
 import {
     fetchStoryIds,
     fetchItems,
+    fetchItemsProgressive,
     extractDomain,
     timeAgo,
     filterByDate,
+    filterHN,
     type HNItem,
     type HNFeed,
     type DateFilter,
@@ -34,7 +37,12 @@ const SANS_MEDIUM = 'Inter_500Medium'
 const SANS_SEMIBOLD = 'Inter_600SemiBold'
 
 const HN_ORANGE = '#E65100'
-const PAGE_SIZE = 30
+
+// İlk parti küçük tutuluyor: ölçüm 15 öğenin ~200 ms, 30 öğenin ~1 sn
+// sürdüğünü gösterdi ve ekrana zaten ~4-5 kart sığıyor. Kalan öğeler ilk
+// boyamadan sonra arka planda partiler hâlinde ekleniyor.
+const FIRST_BATCH = 15
+const NEXT_BATCH = 10
 
 // ─── Date Filter Labels ─────────────────────────────────────────────────────
 
@@ -185,16 +193,34 @@ export default function HNScreen({
     const [items, setItems] = useState<HNItem[]>([])
     const [loading, setLoading] = useState(true)
     const [refreshing, setRefreshing] = useState(false)
+    const [searchQuery, setSearchQuery] = useState('')
+    const [searchFocused, setSearchFocused] = useState(false)
 
     const loadFeed = useCallback(async (selectedFeed: HNFeed, isRefresh = false) => {
         if (isRefresh) setRefreshing(true)
         else setLoading(true)
-        
+
         try {
             const ids = await fetchStoryIds(selectedFeed)
             setAllIds(ids)
-            const batch = await fetchItems(ids.slice(0, PAGE_SIZE))
-            setItems(batch)
+
+            if (ids.length === 0) {
+                setItems([])
+                return
+            }
+
+            // İlk parti gelince loading'i kapat: kullanıcı ~200 ms'de içerik görür.
+            // Devam eden partiler arka planda eklenir.
+            const first = await fetchItems(ids.slice(0, FIRST_BATCH))
+            setItems(first)
+            setLoading(false)
+
+            const rest = ids.slice(FIRST_BATCH, FIRST_BATCH + 45)
+            if (rest.length > 0) {
+                await fetchItemsProgressive(rest, (batch) => {
+                    setItems((prev) => [...prev, ...batch])
+                }, NEXT_BATCH)
+            }
         } catch {
             setItems([])
         } finally {
@@ -207,7 +233,9 @@ export default function HNScreen({
         loadFeed(feed)
     }, [feed])
 
-    const displayItems = filterByDate(items, dateFilter)
+    // Açtıktan hemen sonra filtrelenecek Türkçe sorgular çok sonuç bulmayıp
+    // görüneni boşaltabilir. Sorgu uzunluğuna göre aramayı yapmaya devam et.
+    const displayItems = filterByDate(filterHN(items, searchQuery), dateFilter)
 
     const FEED_TABS: { key: HNFeed; label: string }[] = [
         { key: 'top', label: 'En İyi' },
@@ -303,6 +331,46 @@ export default function HNScreen({
                 ))}
             </View>
 
+            {/* Arama — yerel başlık/domain filtresi (HN API arama sunmuyor) */}
+            <View
+                style={[
+                    s.searchBox,
+                    {
+                        borderColor: searchFocused ? HN_ORANGE : colors.inputBorder,
+                        backgroundColor: colors.card,
+                    },
+                ]}
+            >
+                <Ionicons
+                    name="search-outline"
+                    size={16}
+                    color={searchFocused ? HN_ORANGE : colors.mutedLight}
+                    style={{ marginRight: 8 }}
+                />
+                <TextInput
+                    value={searchQuery}
+                    onChangeText={setSearchQuery}
+                    onFocus={() => setSearchFocused(true)}
+                    onBlur={() => setSearchFocused(false)}
+                    placeholder="Başlık veya site ara..."
+                    placeholderTextColor={colors.mutedLight}
+                    returnKeyType="search"
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    style={[s.searchInput, { color: colors.ink }]}
+                />
+                {searchQuery.length > 0 && (
+                    <Pressable
+                        onPress={() => setSearchQuery('')}
+                        hitSlop={8}
+                        accessibilityLabel="Aramayı temizle"
+                        accessibilityRole="button"
+                    >
+                        <Ionicons name="close-circle" size={16} color={colors.mutedLight} />
+                    </Pressable>
+                )}
+            </View>
+
             {/* Content */}
             {loading ? (
                 <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 28 }}>
@@ -326,7 +394,9 @@ export default function HNScreen({
                         <View style={s.emptyBox}>
                             <Ionicons name="hourglass-outline" size={32} color={colors.mutedLight} />
                             <Text style={[s.emptyText, { color: colors.muted }]}>
-                                Bu filtre için sonuç bulunamadı.
+                                {searchQuery.trim()
+                                    ? `"${searchQuery.trim()}" için sonuç bulunamadı.`
+                                    : 'Bu filtre için sonuç bulunamadı.'}
                             </Text>
                         </View>
                     ) : (
@@ -413,6 +483,21 @@ const s = StyleSheet.create({
         flexDirection: 'row',
         borderBottomWidth: 1,
         paddingHorizontal: 20,
+    },
+    searchBox: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        borderWidth: 1.5,
+        borderRadius: 10,
+        paddingHorizontal: 12,
+        marginHorizontal: 16,
+        marginTop: 10,
+    },
+    searchInput: {
+        flex: 1,
+        paddingVertical: 9,
+        fontFamily: SANS,
+        fontSize: 13,
     },
     feedTab: {
         paddingVertical: 10,

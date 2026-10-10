@@ -34,7 +34,7 @@ import { lightColors, darkColors, SOURCE_META, type ColorScheme } from './src/th
 import { searchArticles, translateText, summarizeText, type Article } from './src/api/client'
 import { fetchStoryIds, fetchItems, extractDomain, timeAgo, type HNItem } from './src/api/hn'
 import { fetchEvrimAgaciArticles, searchEvrimAgaci, formatEvrimDate, type EvrimAgaciArticle } from './src/api/evrimagaci'
-import { fetchAllNews, filterNews, formatNewsDate, getNewsSourceMeta, FALLBACK_SOURCE_META, type NewsArticle } from './src/api/news'
+import { fetchAllNews, filterNews, formatNewsDate, getNewsSourceMeta, NEWS_SOURCES, FALLBACK_SOURCE_META, type NewsArticle } from './src/api/news'
 import SettingsScreen from './src/screens/SettingsScreen'
 import SavedScreen from './src/screens/SavedScreen'
 import ProfileScreen from './src/screens/ProfileScreen'
@@ -46,7 +46,7 @@ import ArticleWebViewScreen from './src/screens/ArticleWebViewScreen'
 import OnboardingScreen from './src/screens/OnboardingScreen'
 import OfflineReaderScreen from './src/screens/OfflineReaderScreen'
 import { DownloadsProvider, useDownloads, type DownloadedArticle } from './src/store/DownloadsContext'
-import { CustomSourcesProvider } from './src/store/CustomSourcesContext'
+import { CustomSourcesProvider, useCustomSources } from './src/store/CustomSourcesContext'
 import DiscoverScreen from './src/screens/DiscoverScreen'
 import HamburgerMenu from './src/screens/HamburgerMenu'
 
@@ -143,6 +143,7 @@ function ResultsScreen({
     onSearch,
     onOpenUrl,
     colors,
+    mode = 'academic',
 }: {
     query: string
     onBack: () => void
@@ -150,8 +151,10 @@ function ResultsScreen({
     onSearch: (q: string) => void
     onOpenUrl: (url: string, title: string) => void
     colors: ColorScheme
+    mode?: 'academic' | 'news'
 }) {
     const { sources } = useSettings()
+    const { customSources } = useCustomSources()
     const [articles, setArticles] = useState<Article[]>([])
     const [loading, setLoading] = useState(true)
     const [loadingMore, setLoadingMore] = useState(false)
@@ -174,15 +177,36 @@ function ResultsScreen({
         setArticles([])
         setPage(1)
         setHasMore(true)
-        searchArticles(query, sources, 1)
-            .then((data) => {
-                if (!cancelled) {
+
+        const academic = mode === 'academic'
+
+        if (academic) {
+            searchArticles(query, sources, 1)
+                .then((data) => {
+                    if (cancelled) return
                     setArticles(data)
                     if (data.length === 0) setHasMore(false)
-                }
+                })
+                .catch((err) => {
+                    if (cancelled) return
+                    setError(err.message || 'Bir hata oluştu')
+                })
+                .finally(() => {
+                    if (!cancelled) setLoading(false)
+                })
+            return
+        }
+
+        // Haber modunda: istemci tarafı filtre (RSS tam listesi çekilir)
+        fetchAllNews(undefined, { sources: [...NEWS_SOURCES, ...customSources] })
+            .then((all) => {
+                if (cancelled) return
+                setNewsResults(filterNews(all, query))
+                setHasMore(false)
             })
             .catch((err) => {
-                if (!cancelled) setError(err.message || 'Bir hata oluştu')
+                if (cancelled) return
+                setError(err.message || 'Haberler yüklenemedi')
             })
             .finally(() => {
                 if (!cancelled) setLoading(false)
@@ -190,23 +214,29 @@ function ResultsScreen({
         return () => {
             cancelled = true
         }
-    }, [query, sources])
+    }, [query, sources, mode, customSources])
 
-    // Also search Evrim Ağacı
+    // Evrim Ağacı — yalnızca akademik aramada görünür (kendi sekmesi ayrı)
     useEffect(() => {
+        if (mode !== 'academic') {
+            setEvrimResults([])
+            return
+        }
+        let cancelled = false
         searchEvrimAgaci(query)
-            .then(setEvrimResults)
+            .then((data) => {
+                if (!cancelled) setEvrimResults(data)
+            })
             .catch(() => setEvrimResults([]))
-    }, [query])
+        return () => {
+            cancelled = true
+        }
+    }, [query, mode])
 
-    // Also search news
-    useEffect(() => {
-        fetchAllNews()
-            .then((all) => setNewsResults(filterNews(all, query)))
-            .catch(() => setNewsResults([]))
-    }, [query])
-
+    // Sayfalama yalnızca akademik aramada var; haber RSS'i tek seferde 20-50
+    // öğe döndürüyor.
     const loadMore = () => {
+        if (mode !== 'academic') return
         const nextPage = page + 1
         setLoadingMore(true)
         searchArticles(query, sources, nextPage)
@@ -218,6 +248,10 @@ function ResultsScreen({
             .catch(() => {})
             .finally(() => setLoadingMore(false))
     }
+
+    // Modad göre gösterilecek liste ve sonuç sayısı
+    const academicMode = mode === 'academic'
+    const listCount = academicMode ? articles.length : newsResults.length
 
     return (
         <View style={{ flex: 1, backgroundColor: colors.cream }}>
@@ -247,7 +281,9 @@ function ResultsScreen({
                 </View>
                 {!loading && !error && (
                     <Text style={[styles.resultsCount, { color: colors.mutedLight }]}>
-                        {articles.length + evrimResults.length + newsResults.length} sonuç bulundu
+                        {academicMode
+                            ? `${articles.length + evrimResults.length} sonuç bulundu`
+                            : `${newsResults.length} haber bulundu`}
                     </Text>
                 )}
             </View>
@@ -276,7 +312,7 @@ function ResultsScreen({
                         <Text style={styles.retryBtnText}>Tekrar Dene</Text>
                     </Pressable>
                 </View>
-            ) : articles.length === 0 && evrimResults.length === 0 && newsResults.length === 0 ? (
+            ) : (academicMode ? articles.length + evrimResults.length : newsResults.length) === 0 ? (
                 <View style={styles.centerBox}>
                     <Ionicons name="search-outline" size={32} color={colors.mutedLight} style={{ marginBottom: 12 }} />
                     <Text style={[styles.statusText, { color: colors.ink }]}>Sonuç bulunamadı</Text>
@@ -286,14 +322,14 @@ function ResultsScreen({
                 </View>
             ) : (
                 <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 20, gap: 10 }}>
-                    {/* News Results */}
-                    {newsResults.length > 0 && (
+                    {/* Haber sonuçları — yalnızca haber modunda */}
+                    {!academicMode && newsResults.length > 0 && (
                         <View style={{ gap: 10, marginTop: 6 }}>
                             <Text style={{ fontFamily: 'Inter_600SemiBold', fontSize: 11, letterSpacing: 1, color: '#C62828', textTransform: 'uppercase' as const }}>
                                 HABER SONUÇLARI
                             </Text>
                             {newsResults.map((news) => {
-                                const srcMeta = getNewsSourceMeta(news.source)
+                                const srcMeta = getNewsSourceMeta(news.source, [...NEWS_SOURCES, ...customSources])
                                 const badgeColor = srcMeta?.color ?? FALLBACK_SOURCE_META.color
                                 const badgeBg = srcMeta?.bg ?? FALLBACK_SOURCE_META.bg
                                 return (
@@ -320,8 +356,8 @@ function ResultsScreen({
                         </View>
                     )}
 
-                    {/* Evrim Ağacı Results */}
-                    {evrimResults.length > 0 && (
+                    {/* Evrim Ağacı — yalnızca akademik modda */}
+                    {academicMode && evrimResults.length > 0 && (
                         <View style={{ gap: 10, marginTop: 6 }}>
                             <Text style={{ fontFamily: 'Inter_600SemiBold', fontSize: 11, letterSpacing: 1, color: '#2D8C3E', textTransform: 'uppercase' as const }}>
                                 EVRİM AĞACI SONUÇLARI
@@ -354,12 +390,12 @@ function ResultsScreen({
                     )}
 
                     {/* Academic Results */}
-                    {articles.length > 0 && evrimResults.length > 0 && (
+                    {academicMode && articles.length > 0 && evrimResults.length > 0 && (
                         <Text style={{ fontFamily: 'Inter_600SemiBold', fontSize: 11, letterSpacing: 1, color: colors.mutedLight, textTransform: 'uppercase' as const, marginTop: 6 }}>
                             AKADEMİK MAKALELER
                         </Text>
                     )}
-                    {articles.map((article) => (
+                    {academicMode && articles.map((article) => (
                         <ArticleCard
                             key={article.id}
                             article={article}
@@ -367,7 +403,7 @@ function ResultsScreen({
                             colors={colors}
                         />
                     ))}
-                    {hasMore && (
+                    {academicMode && hasMore && (
                         <Pressable
                             onPress={loadMore}
                             disabled={loadingMore}
@@ -761,6 +797,8 @@ function AppInner() {
 
     // Arama sonuçlarının hangi sekmeden açıldığı — geri dönüş oraya yapılır.
     const [searchOrigin, setSearchOrigin] = useState<Screen>('discover')
+    // Gündem araması yalnızca haber getirir; Keşfet araması yalnızca akademik.
+    const [searchMode, setSearchMode] = useState<'academic' | 'news'>('academic')
 
     // Hamburger menünün açıldığı ekran — geri dönüş buraya yapılır.
     const [menuOrigin, setMenuOrigin] = useState<Screen>(HOME_SCREEN)
@@ -797,9 +835,10 @@ function AppInner() {
 
     if (!fontsLoaded || !ready) return null
 
-    const handleSearch = (q: string, origin: Screen = screen) => {
+    const handleSearch = (q: string, mode: 'academic' | 'news' = 'academic') => {
         setQuery(q)
-        setSearchOrigin(origin)
+        setSearchOrigin(screen)
+        setSearchMode(mode)
         setScreen('results')
     }
 
@@ -875,7 +914,15 @@ function AppInner() {
             <SafeAreaView style={{ flex: 1, backgroundColor: colors.cream }} edges={['top', 'bottom']}>
                 <StatusBar style={darkMode ? 'light' : 'dark'} />
                 {screen === 'results' && (
-                    <ResultsScreen query={query} onBack={handleBack} onArticle={handleArticle} onSearch={handleSearch} onOpenUrl={handleOpenUrl} colors={colors} />
+                    <ResultsScreen
+                        query={query}
+                        onBack={handleBack}
+                        onArticle={handleArticle}
+                        onSearch={handleSearch}
+                        onOpenUrl={handleOpenUrl}
+                        colors={colors}
+                        mode={searchMode}
+                    />
                 )}
                 {screen === 'detail' && article && (
                     <DetailScreen article={article} onBack={handleBack} onOpenUrl={handleOpenUrl} colors={colors} />

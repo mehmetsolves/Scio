@@ -8,9 +8,17 @@ import {
     ScrollView,
     StyleSheet,
     Alert,
+    ActivityIndicator,
 } from 'react-native'
 import Ionicons from '@expo/vector-icons/Ionicons'
-import { useSettings, type SourceName, type Engine, type TranslationStyle } from '../store/SettingsContext'
+import {
+    useSettings,
+    type SourceName,
+    type Engine,
+    type TranslationStyle,
+    type CategoryId,
+} from '../store/SettingsContext'
+import { useCustomSources } from '../store/CustomSourcesContext'
 import type { ColorScheme } from '../theme/colors'
 
 // ─── Font constants (same as App.tsx) ────────────────────────────────────────
@@ -41,6 +49,13 @@ const STYLE_LABELS: { key: TranslationStyle; label: string }[] = [
     { key: 'simple', label: 'Sade' },
 ]
 
+const CATEGORY_LABELS: Record<CategoryId, string> = {
+    discover: 'Keşfet (makaleler)',
+    evrimagaci: 'Bilim (Evrim Ağacı)',
+    hn: 'Teknoloji (Hacker News)',
+    news: 'Gündem (Türk haberleri)',
+}
+
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export default function SettingsScreen({ colors, onBack }: { colors: ColorScheme; onBack?: () => void }) {
@@ -50,14 +65,38 @@ export default function SettingsScreen({ colors, onBack }: { colors: ColorScheme
         engine,
         style,
         apiKey,
+        hiddenTabs,
         toggleSource,
         setDarkMode,
         setEngine,
         setStyle,
         setApiKey,
+        toggleTab,
     } = useSettings()
+    const { customSources, addSource, removeSource } = useCustomSources()
+
+    // Özel kaynak ekleme formunun yerel durumu
+    const [siteLabel, setSiteLabel] = useState('')
+    const [siteUrl, setSiteUrl] = useState('')
+    const [saving, setSaving] = useState(false)
 
     const needsApiKey = engine !== 'mymemory'
+
+    const handleAddSite = async () => {
+        if (saving) return
+        setSaving(true)
+        try {
+            const result = await addSource(siteLabel, siteUrl)
+            if (result.ok) {
+                setSiteLabel('')
+                setSiteUrl('')
+            } else {
+                Alert.alert('Eklenemedi', result.error)
+            }
+        } finally {
+            setSaving(false)
+        }
+    }
 
     return (
         <ScrollView style={{ flex: 1, backgroundColor: colors.cream }}>
@@ -92,6 +131,105 @@ export default function SettingsScreen({ colors, onBack }: { colors: ColorScheme
                             />
                         </View>
                     ))}
+                </View>
+
+                {/* ── Kategoriler ── */}
+                <View style={[s.sectionCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                    <Text style={[s.sectionTitle, { color: colors.burgundy }]}>Kategoriler</Text>
+                    <Text style={[s.sectionHint, { color: colors.muted }]}>
+                        Alt barda hangi sekmeler görünsün. Keşfet her zaman açık kalır.
+                    </Text>
+                    {(Object.keys(CATEGORY_LABELS) as CategoryId[]).map((cat) => {
+                        const isFixed = cat === 'discover'
+                        const visible = !hiddenTabs.includes(cat)
+                        return (
+                            <View key={cat} style={[s.switchRow, { borderBottomColor: colors.border }]}>
+                                <Text style={[s.switchLabel, { color: isFixed ? colors.mutedLight : colors.ink }]}>
+                                    {CATEGORY_LABELS[cat]}
+                                    {isFixed ? ' (sabit)' : ''}
+                                </Text>
+                                <Switch
+                                    value={visible}
+                                    onValueChange={() => toggleTab(cat)}
+                                    disabled={isFixed}
+                                    accessibilityLabel={`${CATEGORY_LABELS[cat]} sekmesi`}
+                                    trackColor={{ false: colors.inputBorder, true: colors.burgundy }}
+                                    thumbColor={colors.card}
+                                />
+                            </View>
+                        )
+                    })}
+                </View>
+
+                {/* ── Özel Kaynaklar ── */}
+                <View style={[s.sectionCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                    <Text style={[s.sectionTitle, { color: colors.burgundy }]}>Kendi Siteni Ekle</Text>
+                    <Text style={[s.sectionHint, { color: colors.muted }]}>
+                        Bir RSS veya Atom adresi ekle; eklediğin sitenin haberleri Gündem akışına karışır.
+                    </Text>
+
+                    <TextInput
+                        value={siteLabel}
+                        onChangeText={setSiteLabel}
+                        placeholder="Site adı (örn. Webtekno)"
+                        placeholderTextColor={colors.mutedLight}
+                        style={[s.apiKeyInput, { color: colors.ink, borderColor: colors.inputBorder, backgroundColor: colors.cream }]}
+                    />
+                    <TextInput
+                        value={siteUrl}
+                        onChangeText={setSiteUrl}
+                        placeholder="https://site.com/rss"
+                        placeholderTextColor={colors.mutedLight}
+                        autoCapitalize="none"
+                        autoCorrect={false}
+                        keyboardType="url"
+                        style={[s.apiKeyInput, { color: colors.ink, borderColor: colors.inputBorder, backgroundColor: colors.cream }]}
+                    />
+
+                    <Pressable
+                        onPress={handleAddSite}
+                        disabled={saving || !siteLabel.trim() || !siteUrl.trim()}
+                        accessibilityLabel="Siteyi ekle"
+                        accessibilityRole="button"
+                        style={[
+                            s.addBtn,
+                            {
+                                backgroundColor: colors.burgundy,
+                                opacity: saving || !siteLabel.trim() || !siteUrl.trim() ? 0.5 : 1,
+                            },
+                        ]}
+                    >
+                        {saving ? (
+                            <ActivityIndicator size="small" color="#FFFFFF" />
+                        ) : (
+                            <Text style={s.addBtnText}>Siteyi Ekle</Text>
+                        )}
+                    </Pressable>
+
+                    {customSources.length > 0 && (
+                        <View style={{ marginTop: 14, gap: 8 }}>
+                            {customSources.map((src) => (
+                                <View key={src.id} style={[s.customRow, { borderColor: colors.border }]}>
+                                    <Ionicons name="globe-outline" size={15} color={colors.muted} />
+                                    <View style={{ flex: 1 }}>
+                                        <Text style={[s.customLabel, { color: colors.ink }]}>{src.label}</Text>
+                                        <Text style={[s.customUrl, { color: colors.mutedLight }]} numberOfLines={1}>
+                                            {src.rssUrl}
+                                        </Text>
+                                    </View>
+                                    <Pressable
+                                        onPress={() => removeSource(src.id)}
+                                        hitSlop={10}
+                                        accessibilityLabel={`${src.label} kaynağını sil`}
+                                        accessibilityRole="button"
+                                        style={{ padding: 4 }}
+                                    >
+                                        <Ionicons name="close" size={16} color={colors.muted} />
+                                    </Pressable>
+                                </View>
+                            ))}
+                        </View>
+                    )}
                 </View>
 
                 {/* ── Appearance ── */}
@@ -293,6 +431,42 @@ const s = StyleSheet.create({
         fontFamily: SANS,
         fontSize: 11,
         lineHeight: 16,
+    },
+    sectionHint: {
+        fontFamily: SANS,
+        fontSize: 12,
+        lineHeight: 18,
+        marginTop: -8,
+        marginBottom: 12,
+    },
+    addBtn: {
+        marginTop: 10,
+        paddingVertical: 11,
+        borderRadius: 8,
+        alignItems: 'center',
+    },
+    addBtnText: {
+        fontFamily: SANS_SEMIBOLD,
+        fontSize: 13,
+        color: '#FFFFFF',
+    },
+    customRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
+        borderWidth: 1,
+        borderRadius: 8,
+        paddingHorizontal: 10,
+        paddingVertical: 9,
+    },
+    customLabel: {
+        fontFamily: SANS_MEDIUM,
+        fontSize: 13,
+    },
+    customUrl: {
+        fontFamily: SANS,
+        fontSize: 11,
+        marginTop: 1,
     },
     segmentCol: {
         gap: 8,
