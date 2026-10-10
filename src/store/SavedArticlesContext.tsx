@@ -69,11 +69,38 @@ interface SavedArticlesContextValue {
     ready: boolean
 }
 
-const STORAGE_KEY = '@wordreads_saved_articles_v2'
-const HN_STORAGE_KEY = '@wordreads_saved_hn_v2'
-const EVRIM_STORAGE_KEY = '@wordreads_saved_evrim'
+const STORAGE_KEY = '@scio_saved_articles_v2'
+const HN_STORAGE_KEY = '@scio_saved_hn_v2'
+const EVRIM_STORAGE_KEY = '@scio_saved_evrim'
+// v1 (düz Article[]) → v2 (entry) geçişi için eski anahtarlar
 const LEGACY_STORAGE_KEY = '@wordreads_saved_articles'
 const LEGACY_HN_STORAGE_KEY = '@wordreads_saved_hn'
+// WordReads → Scio yeniden adlandırması öncesi v2 anahtarları
+const RENAME_STORAGE_KEY = '@wordreads_saved_articles_v2'
+const RENAME_HN_STORAGE_KEY = '@wordreads_saved_hn_v2'
+const RENAME_EVRIM_STORAGE_KEY = '@wordreads_saved_evrim'
+
+// Yeniden adlandırma öncesi kayıtları yeni anahtarlara taşır. Eski v2 kaydı
+// varsa ve yeni anahtar boşsa kopyalar; ardından artığı siler. Idempotent:
+// ikinci açılışta eski anahtar bulunmaz, hiçbir şey yapmaz.
+async function migrateRenamedKeys(): Promise<void> {
+    const pairs: [string, string][] = [
+        [RENAME_STORAGE_KEY, STORAGE_KEY],
+        [RENAME_HN_STORAGE_KEY, HN_STORAGE_KEY],
+        [RENAME_EVRIM_STORAGE_KEY, EVRIM_STORAGE_KEY],
+    ]
+    for (const [from, to] of pairs) {
+        try {
+            const old = await AsyncStorage.getItem(from)
+            if (!old) continue
+            const current = await AsyncStorage.getItem(to)
+            if (!current) await AsyncStorage.setItem(to, old)
+            await AsyncStorage.removeItem(from)
+        } catch (e) {
+            console.warn(`Failed to rename key ${from} → ${to}:`, e)
+        }
+    }
+}
 
 // ─── Context ─────────────────────────────────────────────────────────────────
 
@@ -97,6 +124,7 @@ export function SavedArticlesProvider({ children }: { children: ReactNode }) {
     useEffect(() => {
         ;(async () => {
             try {
+                await migrateRenamedKeys()
                 const [rawV2, rawHNV2, rawEvrim, rawLegacy, rawLegacyHN] = await Promise.all([
                     AsyncStorage.getItem(STORAGE_KEY),
                     AsyncStorage.getItem(HN_STORAGE_KEY),

@@ -64,52 +64,8 @@ export const NEWS_SOURCES: NewsSource[] = [
     },
 ]
 
-// ── Simple XML helpers (same pattern as evrimagaci.ts) ──────────────────────
-
-function extractTag(xml: string, tag: string): string {
-    const open = `<${tag}>`
-    const close = `</${tag}>`
-
-    const startIdx = xml.indexOf(open)
-    if (startIdx === -1) return ''
-
-    const afterOpen = startIdx + open.length
-    const endIdx = xml.indexOf(close, afterOpen)
-    if (endIdx === -1) return ''
-
-    let content = xml.substring(afterOpen, endIdx).trim()
-
-    // Strip CDATA wrapper if present
-    if (content.startsWith('<![CDATA[') && content.endsWith(']]>')) {
-        content = content.slice(9, -3)
-    }
-
-    return content
-}
-
-function extractAttribute(xml: string, tag: string, attr: string): string {
-    const regex = new RegExp(`<${tag}[^>]+${attr}="([^"]*)"`, 'i')
-    const match = xml.match(regex)
-    return match ? match[1] : ''
-}
-
-function stripHtml(html: string): string {
-    return html
-        .replace(/<[^>]*>/g, '')
-        .replace(/&amp;/g, '&')
-        .replace(/&lt;/g, '<')
-        .replace(/&gt;/g, '>')
-        .replace(/&quot;/g, '"')
-        .replace(/&#039;/g, "'")
-        .replace(/&#x27;/g, "'")
-        .replace(/&apos;/g, "'")
-        .replace(/&nbsp;/g, ' ')
-        .replace(/&#8217;/g, "'")
-        .replace(/&#8220;/g, '"')
-        .replace(/&#8221;/g, '"')
-        .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(parseInt(n)))
-        .trim()
-}
+// ── XML yardımcıları (evrimagaci.ts ile ortak) ──────────────────────────────
+import { extractTag, extractAttribute, stripHtml, makeStableId } from './rss'
 
 // Some RSS feeds (e.g. Sözcü) emit pubDate values that `new Date()` can't parse
 // (Turkish month names, extra commas, etc.). Convert safely without throwing.
@@ -131,15 +87,9 @@ function toISODate(pubDate: string): string {
     return fallback
 }
 
-// Stable, collision-resistant id for a feed item. Stripping the link to its last
-// 20 chars collapses distinct URLs (BBC's `?at_campaign=RSS` suffix) into the same
-// key, so we hash the full link instead.
+// Her feed öğesi için kararlı, çakışmaya dirençli ID (ortak yardımcı).
 function makeArticleId(sourceId: NewsSourceId, link: string): string {
-    let hash = 5381
-    for (let i = 0; i < link.length; i++) {
-        hash = ((hash << 5) + hash + link.charCodeAt(i)) >>> 0
-    }
-    return `news-${sourceId}-${hash.toString(36)}`
+    return makeStableId(`news-${sourceId}`, link)
 }
 
 // ── Parse RSS XML ───────────────────────────────────────────────────────────

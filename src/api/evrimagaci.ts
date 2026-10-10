@@ -16,51 +16,8 @@ export interface EvrimAgaciArticle {
 
 const RSS_URL = 'https://evrimagaci.org/rss.xml'
 
-// ── Simple XML tag extractor (no external dep) ──────────────────────────────
-
-function extractTag(xml: string, tag: string): string {
-    const open = `<${tag}>`
-    const close = `</${tag}>`
-
-    const startIdx = xml.indexOf(open)
-    if (startIdx === -1) return ''
-
-    const afterOpen = startIdx + open.length
-    const endIdx = xml.indexOf(close, afterOpen)
-    if (endIdx === -1) return ''
-
-    let content = xml.substring(afterOpen, endIdx).trim()
-
-    // Strip CDATA wrapper if present
-    if (content.startsWith('<![CDATA[') && content.endsWith(']]>')) {
-        content = content.slice(9, -3)
-    }
-
-    return content
-}
-
-function extractAttribute(xml: string, tag: string, attr: string): string {
-    const regex = new RegExp(`<${tag}[^>]+${attr}="([^"]*)"`, 'i')
-    const match = xml.match(regex)
-    return match ? match[1] : ''
-}
-
-// ── Strip HTML tags ─────────────────────────────────────────────────────────
-
-function stripHtml(html: string): string {
-    return html
-        .replace(/<[^>]*>/g, '')
-        .replace(/&amp;/g, '&')
-        .replace(/&lt;/g, '<')
-        .replace(/&gt;/g, '>')
-        .replace(/&quot;/g, '"')
-        .replace(/&#039;/g, "'")
-        .replace(/&#x27;/g, "'")
-        .replace(/&apos;/g, "'")
-        .replace(/&nbsp;/g, ' ')
-        .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(parseInt(n)))
-        .trim()
-}
+// ── XML yardımcıları (news.ts ile ortak) ────────────────────────────────────
+import { extractTag, extractAttribute, stripHtml } from './rss'
 
 // ── Parse RSS XML ───────────────────────────────────────────────────────────
 

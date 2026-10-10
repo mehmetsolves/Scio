@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "WordReads",
-    "slug": "wordreads",
+    "name": "Scio",
+    "slug": "scio",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -10,13 +10,17 @@
       "backgroundColor": "#FAF7F2"
     },
     "android": {
-      "package": "com.wordreads.app",
+      "package": "com.scio.app",
       "versionCode": 1,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#FAF7F2"
       },
       "permissions": ["INTERNET"]
+    },
+    "ios": {
+      "bundleIdentifier": "com.scio.app",
+      "supportsTablet": true
     },
     "plugins": [
       "expo-asset",

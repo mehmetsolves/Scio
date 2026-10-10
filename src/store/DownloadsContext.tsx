@@ -42,8 +42,35 @@ interface DownloadsContextValue {
 
 // One key per article (its index is a small list of ids). Avoids the Android
 // per-entry AsyncStorage limit and rewrites only the changed entry.
-const INDEX_KEY = '@wordreads_downloads_index'
-const entryKey = (id: string) => `@wordreads_download_${id}`
+const INDEX_KEY = '@scio_downloads_index'
+const entryKey = (id: string) => `@scio_download_${id}`
+const LEGACY_INDEX_KEY = '@wordreads_downloads_index'
+const legacyEntryKey = (id: string) => `@wordreads_download_${id}`
+
+// WordReads → Scio: indirme kayıtlarını yeni anahtar şemasına taşır. Entry
+// başına bir anahtar olduğu için önce index okunur, her kayıt kopyalanır,
+// sonra eski anahtarlar silinir. Idempotent.
+async function migrateDownloadedArticles(): Promise<void> {
+    try {
+        const rawIndex = await AsyncStorage.getItem(LEGACY_INDEX_KEY)
+        if (!rawIndex) return
+        const ids: string[] = JSON.parse(rawIndex)
+
+        for (const id of ids) {
+            const old = await AsyncStorage.getItem(legacyEntryKey(id))
+            if (!old) continue
+            const current = await AsyncStorage.getItem(entryKey(id))
+            if (!current) await AsyncStorage.setItem(entryKey(id), old)
+            await AsyncStorage.removeItem(legacyEntryKey(id))
+        }
+
+        const currentIndex = await AsyncStorage.getItem(INDEX_KEY)
+        if (!currentIndex) await AsyncStorage.setItem(INDEX_KEY, rawIndex)
+        await AsyncStorage.removeItem(LEGACY_INDEX_KEY)
+    } catch (e) {
+        console.warn('Failed to migrate downloaded articles:', e)
+    }
+}
 
 const MAX_BODY_CHARS = 30_000
 
@@ -82,6 +109,7 @@ export function DownloadsProvider({ children }: { children: ReactNode }) {
     useEffect(() => {
         ;(async () => {
             try {
+                await migrateDownloadedArticles()
                 const raw = await AsyncStorage.getItem(INDEX_KEY)
                 const ids: string[] = raw ? JSON.parse(raw) : []
                 const entries = await Promise.all(

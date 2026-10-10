@@ -41,7 +41,7 @@ export default function ProfileScreen({ colors, onBack }: { colors: ColorScheme;
             <View style={{ padding: 20, gap: 20 }}>
                 {/* App Info */}
                 <View style={[s.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                    <Text style={[s.appName, { color: colors.burgundy }]}>WordReads</Text>
+                    <Text style={[s.appName, { color: colors.burgundy }]}>Scio</Text>
                     <Text style={[s.tagline, { color: colors.muted }]}>
                         Akademik okuma, ana dilinizde.
                     </Text>
@@ -86,7 +86,7 @@ export default function ProfileScreen({ colors, onBack }: { colors: ColorScheme;
                 </View>
 
                 {/* Version */}
-                <Text style={[s.version, { color: colors.mutedLight }]}>WordReads v1.0.0</Text>
+                <Text style={[s.version, { color: colors.mutedLight }]}>Scio v1.0.0</Text>
             </View>
 
             <View style={{ height: 40 }} />

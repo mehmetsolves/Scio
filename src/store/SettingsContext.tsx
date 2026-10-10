@@ -34,8 +34,40 @@ type SettingsContextValue = SettingsState & SettingsActions
 // ─── Defaults ────────────────────────────────────────────────────────────────
 
 const DEFAULT_SOURCES: SourceName[] = ['arxiv', 'semanticscholar', 'openalex']
-const STORAGE_KEY = '@wordreads_settings'
-const SECURE_KEY = 'wordreads_api_key'
+const STORAGE_KEY = '@scio_settings'
+const SECURE_KEY = 'scio_api_key'
+// WordReads → Scio yeniden adlandırması öncesi kullanılan anahtarlar.
+// Bir kereliğine okunup yeni anahtarlara taşınır (bkz. migrateLegacyKeys).
+const LEGACY_STORAGE_KEY = '@wordreads_settings'
+const LEGACY_SECURE_KEY = 'wordreads_api_key'
+
+// Eski anahtarları yeni adlara tek seferde taşır. Taşıma başarılı olunca eski
+// kayıt silinir; böylece bir sonraki açılışta tekrar okunmaz ve kullanıcı
+// ayarlarını/API anahtarını kaybetmez.
+async function migrateLegacyKeys(): Promise<void> {
+    try {
+        const legacyRaw = await AsyncStorage.getItem(LEGACY_STORAGE_KEY)
+        if (legacyRaw) {
+            const current = await AsyncStorage.getItem(STORAGE_KEY)
+            // Yeni anahtar zaten doluysa taşımaya gerek yok, sadece artığı temizle.
+            if (!current) await AsyncStorage.setItem(STORAGE_KEY, legacyRaw)
+            await AsyncStorage.removeItem(LEGACY_STORAGE_KEY)
+        }
+    } catch (e) {
+        console.warn('Failed to migrate legacy settings:', e)
+    }
+
+    try {
+        const legacyKey = await SecureStore.getItemAsync(LEGACY_SECURE_KEY)
+        if (legacyKey) {
+            const currentKey = await SecureStore.getItemAsync(SECURE_KEY)
+            if (!currentKey) await SecureStore.setItemAsync(SECURE_KEY, legacyKey)
+            await SecureStore.deleteItemAsync(LEGACY_SECURE_KEY)
+        }
+    } catch (e) {
+        console.warn('Failed to migrate legacy API key:', e)
+    }
+}
 
 // ─── Context ─────────────────────────────────────────────────────────────────
 
@@ -63,6 +95,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     useEffect(() => {
         ;(async () => {
             try {
+                await migrateLegacyKeys()
                 const raw = await AsyncStorage.getItem(STORAGE_KEY)
                 if (raw) {
                     const parsed = JSON.parse(raw)

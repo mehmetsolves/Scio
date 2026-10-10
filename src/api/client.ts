@@ -1,5 +1,9 @@
 // ─── API Client ──────────────────────────────────────────────────────────────
 
+// NOT: Uygulama Scio olarak yeniden adlandırıldı ama backend Worker hâlâ eski
+// adresinde yayında (Cloudflare'de deploy edilmiş, bu repoda kaynak kodu yok).
+// Worker yeniden deploy edilip yeni bir adres alana kadar bu URL değişmemeli;
+// değiştirilirse arama/çeviri/özetleme tamamen çalışmaz hale gelir.
 const API_BASE_URL = 'https://wordreads-worker.yildirimmehmed21.workers.dev'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
