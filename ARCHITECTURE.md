@@ -184,12 +184,36 @@ NewsScreen (Gündem) ──┬── [Arama çubuğu] ──→ ResultsScreen �
    │   EvrimAgaciScreen ──→ ArticleWebViewScreen                  │
    │   NewsScreen kartı ──→ ArticleWebViewScreen                  │
    │                                                             │
-   └── TabBar ──┬── Gündem (📰) ────→ NewsScreen                  │
-                ├── HN (▲) ─────────→ HNScreen                   │
+   └── TabBar ──┬── Keşfet (📚) ─────→ DiscoverScreen              │
                 ├── Bilim (🔭) ─────→ EvrimAgaciScreen           │
-                └── Kayıtlı (🔖) ───→ SavedScreen                 │
+                ├── Teknoloji (▲) ──→ HNScreen                   │
+                └── Gündem (📰) ─────→ NewsScreen                 │
                                      └── [Offline kart] → OfflineReaderScreen
+
+   ┌──────────────────────────────────────────────────────────┐
+   │  Hamburger menü (☰ — her sekme ekranında sağ üstte)      │
+   │    ├── Kayıtlılar ──→ SavedScreen                        │
+   │    ├── Ayarlar ─────→ SettingsScreen                      │
+   │    └── Profil ──────→ ProfileScreen                       │
+   └──────────────────────────────────────────────────────────┘
 ```
+
+**Alt bar dört sabit sekmeden** oluşur. Kayıtlılar, Ayarlar ve Profil
+artık sekme değildir — hamburger menüden açılır. Ayarlar → **Kategoriler**
+bölümünden Bilim/Teknoloji/Gündem sekmeleri kapatılabilir (Keşfet sabittir).
+
+### Arama davranışı
+
+Her sekme **kendi türünü** arar; sonuçlar karışmaz:
+
+| Arama yapılan yer | `mode` | Sonuçlar |
+|---|---|---|
+| Keşfet / ilgi alanı çipleri | `academic` | arXiv, Semantic Scholar, OpenAlex (+ Evrim Ağacı) |
+| Gündem arama çubuğu | `news` | Türk haber RSS'leri (gömülü + özel kaynaklar) |
+| Teknoloji arama çubuğu | istemci filtresi | Yüklenmiş HN öğeleri (başlık/domain/yazar) |
+
+Geri dönüş her zaman aramanın **yapıldığı sekmeye** gider
+(`searchOrigin`), sabit olarak Gündem'e değil.
 
 ---
 
@@ -208,64 +232,113 @@ NewsScreen (Gündem) ──┬── [Arama çubuğu] ──→ ResultsScreen �
 ```
 Kullanıcı → Konu Seç → [Devam Et] → selectedTopics kaydedilir
                                     → hasCompletedOnboarding = true
-                                    → Gündem (NewsScreen) açılır
+                                    → Keşfet (DiscoverScreen) açılır
 ```
 
-Seçilen konular bir daha **Gündem ekranında çip olarak** görünür ve tek
-dokunuşla o konuda arama başlatır (bkz. 5.8). Önceden toplanıp hiç
+Seçilen konular bu keşfet akışını besler. Önceden toplanıp hiçbir yerde
 kullanılmıyordu.
 
 ---
 
-### 5.2 Gündem — Ana Ekran (NewsScreen)
+### 5.2 Keşfet — Ana Ekran (DiscoverScreen)
 
-**Amaç:** Uygulamanın açılış ekranı. Türk haber RSS akışı + arama girişi +
-ilgi alanı kısayolları.
+**Amaç:** Uygulamanın açılış ekranı. Onboarding'de seçilen ilgi alanlarına
+göre akademik makale akışı.
 
 **Bölümler (Yukarıdan Aşağıya):**
 
 | Sıra | Bölüm | Kaynak | İçerik |
 |------|-------|--------|--------|
-| 1 | **Başlık + Profil/Ayarlar** | - | "Gündem" başlığı, iki ikon buton |
-| 2 | **Arama çubuğu** | - | Akademik arama başlatır (ResultsScreen) |
-| 3 | **İlgi alanı çipleri** | Onboarding | `selectedTopics` — varsa gösterilir, tek dokunuşla arar |
-| 4 | **Kaynak filtresi** | BBC, NTV, Sözcü, Hürriyet | Haber akışını kaynağa göre filtreler |
-| 5 | **Haber kartları** | 4 RSS | Kaynak renk şeridi + başlık + özet + indir butonu |
+| 1 | **Başlık + Menü** | - | "Makaleler" başlığı, hamburger menü (☰) |
+| 2 | **Konu başlıkları** | Onboarding | Seçilen her ilgi alanı için ayrı bölüm |
+| 3 | **Akademik kartlar** | arXiv, SS, OpenAlex | O konuya dair makaleler |
+
+**Önemli — Türkçe/İngilizce eşlemesi:**
+Onboarding konuları Türkçe gösterilir ama akademik kaynaklar İngilizce'dir.
+Doğrudan Türkçe konuyla arama yapılırsa sonuç çok zayıf kalıyor:
+
+| Sorgu | Sonuç |
+|---|---|
+| "Psikoloji" | 0 |
+| "Felsefe" | 0 |
+| "Teknoloji" | 4 |
+| "psychology" / "philosophy" / "technology" | 5 / 5 / 5 |
+
+Bu yüzden `src/api/topics.ts` her konu için **hem** kullanıcıya görünen
+etiketi (Türkçe) **hem** akademik arama terimini (İngilizce) tutar.
+`OnboardingScreen` ve `DiscoverScreen` aynı listeyi kullanır; ikisi
+ayrışırsa Keşfet sessizce boş sonuç üretir.
+
+**Performans:** ilk **3 konu** paralel yüklenir (her konu için ayrı
+`searchArticles` çağrısı). Daha fazla konu seçilse bile başlangıç ekranı
+kontrolsüz sayıda istek atmaz. Sonuçlar 5 dakika modül düzeyinde
+cache'lenir, sekme geçişlerinde yeniden çekilmez.
+
+**Boş durum:** `selectedTopics.length === 0` ise "İlgi alanı seç" butonu
+gösterilir ve Ayarlar'a yönlendirir.
+
+---
+
+### 5.3 Gündem — Haber Ekranı (NewsScreen)
+
+**Amaç:** Türk haber RSS akışı + gömülü ve kullanıcının eklediği kaynaklar.
+
+**Bölümler (Yukarıdan Aşağıya):**
+
+| Sıra | Bölüm | Kaynak | İçerik |
+|------|-------|--------|--------|
+| 1 | **Başlık + Menü** | - | "Gündem" başlığı, hamburger menü (☰) |
+| 2 | **Arama çubuğu** | - | **Haber içinde** arar (`mode: 'news'`) |
+| 3 | **İlgi alanı çipleri** | Onboarding | `selectedTopics` — akademik aramaya gider |
+| 4 | **Kaynak filtresi** | Gömülü + özel | Haber akışını kaynağa göre filtreler |
+| 5 | **Haber kartları** | N RSS | Kaynak renk şeridi + başlık + özet + indir butonu |
 
 **Veri Yükleme:**
 ```typescript
 useEffect(() => {
-    fetchAllNews() → setArticles   // 4 RSS paralel, Promise.allSettled
+    // Gömülü 4 kaynak + kullanıcının ekledikleri; paralel, allSettled
+    fetchAllNews(undefined, { sources: allSources }) → setArticles
 }, [])
 ```
 
 **Arama Mekanizması:**
 1. Kullanıcı arama çubuğuna yazar → `query` state güncellenir
-2. Enter/Submit → `onSearch(query)` → `ResultsScreen`'e geçiş
-3. İlgi alanı çipine tıklanırsa → direkt `onSearch(topic)`
+2. Enter/Submit → `onSearch(query, 'news')` → `ResultsScreen`'e geçiş
+3. İlgi alanı çipine tıklanırsa → `onSearch(topic, 'academic')`
+   (ilgi alanları **makale** aramasının kısayolu, haber aramasının değil)
 
 ---
 
-### 5.3 ResultsScreen — Arama Sonuçları
+### 5.4 ResultsScreen — Arama Sonuçları
 
-**Amaç:** Çoklu kaynaktan gelen sonuçları birleşik gösterme.
+**Amaç:** Aramanın sonuçlarını tek bir türde gösterme.
+`mode` prop'u ile iki ayrı davranış:
 
-**3 Paralel Arama:**
+| `mode` | Kaynaklar | Sayfalama |
+|---|---|---|
+| `'academic'` | arXiv, Semantic Scholar, OpenAlex + Evrim Ağacı | ✅ "Daha Fazla Göster" |
+| `'news'` | Gömülü + özel haber RSS'leri | ❌ (RSS tek sayfa döndürür) |
+
+**Akademik Mod:**
 ```
-query ──┬── searchArticles(query, sources) → Akademik makaleler (arXiv, SS, OA)
-        ├── searchEvrimAgaci(query)         → Evrim Ağacı makaleleri
-        └── fetchAllNews() + filterNews()   → Haber sonuçları
+query ──┬── searchArticles(query, sources, page) → Akademik makaleler
+        └── searchEvrimAgaci(query)              → Evrim Ağacı makaleleri
 ```
 
-**Sonuç Sıralaması:**
-1. 📰 Haber sonuçları (en üstte)
-2. 🌿 Evrim Ağacı sonuçları
-3. 📄 Akademik makaleler
+**Haber Modu:**
+```
+fetchAllNews(undefined, { sources: allSources }) + filterNews(all, query)
+```
+
+Eskiden tek arama çubuğu haber + Evrim Ağacı + akademik sonuçlarını aynı
+listeye karıştırıyordu; bu davranış kaldırıldı.
 
 **Sayfalama (Pagination):**
 - Akademik makaleler için `page` state'i tutulur
 - "Daha Fazla Göster" butonu → `loadMore()` → `searchArticles(query, sources, nextPage)`
 - Yeni sonuçlar mevcut listeye eklenir (`[...prev, ...data]`)
+- **Not:** Backend `perPage` değerini tutarlı vermiyor (tek kaynakta 5,
+  üç kaynakta 15), bu yüzden sabit "X makale göster" varsayımı yok.
 
 **Canlı Arama Düzenleme:**
 - Navbar'daki arama çubuğu `TextInput` olarak düzenlenebilir
@@ -406,6 +479,16 @@ type ReadingStatus = 'unread' | 'read_liked' | 'read_disliked'
 | Çeviri Stili | `TranslationStyle` | `academic` | Akademik / Basit |
 | API Anahtarı | `string` | `''` | Kullanıcı girer (güvenli depolama) |
 | Seçili Konular | `string[]` | `[]` | Onboarding'de seçilen konular |
+| Kategoriler (sekme aç/kapa) | `CategoryId[]` (`hiddenTabs`) | `[]` | Keşfet sabit; Bilim / Teknoloji / Gündem kapatılabilir |
+
+**Ek olarak iki bölüm:**
+
+- **Kategoriler:** alt barda hangi sekmeler görüneceğini seçer.
+  Keşfet (uygulamanın açılış ekranı) kapatılamaz ve son görünür sekme
+  de kapatılamaz — kullanıcı boş bir alt barda kalmaz.
+- **Kendi Siteni Ekle:** kullanıcının kendi RSS/Atom adresini eklediği
+  bölüm. Eklensen siteler Gündem akışına karışır ve filtre şubuğunda
+  çip olarak görünür (bkz. 7.4).
 
 ---
 
@@ -559,6 +642,19 @@ POST /api/translate
 
 **Batch Fetch:** `Promise.allSettled()` ile paralel çekme, hatalı olanlar atlanır.
 
+**İlerleyici (progressive) yükleme:**
+Firebase'de toplu endpoint yok — her öğe ayrı istek. Ölçülen gecikme:
+
+| İşlem | Süre |
+|---|---|
+| `fetchStoryIds('top')` | ~0.57 sn |
+| `fetchItems(15)` | ~0.20 sn |
+| `fetchItems(30)` | ~1.0 sn |
+
+Eskiden 30 öğenin **tamamı** bekleniyordu, ekran ~1,5 sn boş kalıyordu.
+Artık ilk parti **15** öğe ile boyanıyor, kalanı arka planda 10'arlı
+partiler hâlinde ekleniyor (`fetchItemsProgressive`).
+
 ### 7.3 RSS Parse (Evrim Ağacı + Haberler)
 
 **Harici bağımlılık yok** — `src/api/rss.ts` içindeki ortak yardımcılar:
@@ -586,6 +682,33 @@ birebir kopyası iki dosyada duruyordu; tek yerde toplandı.
 - RSS yapısı basit ve sabit → custom çözüm yeterli
 - Bundle boyutu azaltılmış
 
+### 7.4 Haber kaynakları: Atom, User-Agent ve özel kaynaklar
+
+**Atom desteği:** NTV Atom formatında (`<feed><entry>`) yayın yapıyor ve
+önceki RSS adresi `308` redirect veriyordu → `news.ts:parseNewsRSS`
+artık `<item>` **ve** `<entry>` bloklarını ayırt ederek işliyor.
+Gerekçe: standart RSS kütüphanelerinin yarısı Atom'u kesip atıyor.
+
+**User-Agent zorunluluğu:** Sözcü `403` döndürüyor, ara katman Proxy
+istemciyi engelliyor. `fetchNewsFromSource` `FETCH_HEADERS` ile
+`User-Agent: Mozilla/5.0 (Linux; Android 10; K)` gönderiyor.
+
+**Kullanıcının kendi kaynağı (özel RSS):**
+- `NewsSourceId` tipi `'bbc' | 'ntv' | ... | (string & {})` olarak
+  gevşetildi — mevcut dört literal tamamlama için korunur, aynı zamanda
+  rastgele sonradan üretilmiş id'ler kabul edilir.
+- `CustomSourcesContext.tsx` kullanıcının eklediği adresleri
+  AsyncStorage'da tutar; `NewsSource` nesnesine dönüştürülür.
+- **Doğrulama şartı:** `validateRssUrl` URL'yi normalize eder
+  (`http:` → `https:`, boşluk atma), ardından **içeriğe** bakar:
+  `<item` veya `<entry` etiketi yoksa reddeder. `res.ok` tek başına
+  yeterli değil — geçersiz adreslerde 32 KB HTML gövdeli `200/404`
+  döndüğü görüldü.
+- **`getNewsSourceMeta` sessiz BBC fallback'ı kaldırıldı:** artık
+  bilinmeyen id için `undefined` dönüyor, çağıran `FALLBACK_SOURCE_META`
+  ile nötr bir rozet gösteriyor. Aksi hâlde eklenen her özel kaynak
+  "BBC Türkçe" gibi görünüyor.
+
 ---
 
 ## 8. Navigasyon Mantığı
@@ -595,37 +718,46 @@ birebir kopyası iki dosyada duruyordu; tek yerde toplandı.
 React Navigation kullanılmıyor. Navigasyon tamamen `screen` state'i ile yönetiliyor:
 
 ```typescript
-type Screen = 'results' | 'detail' | 'settings' | 'saved' | 'profile' |
-              'hn' | 'hnReader' | 'webview' | 'evrimagaci' | 'news' |
-              'offlineReader'
+type Screen = 'discover' | 'results' | 'detail' | 'settings' | 'saved' |
+              'profile' | 'hn' | 'hnReader' | 'webview' | 'evrimagaci' |
+              'news' | 'offlineReader'
 
-const [screen, setScreen] = useState<Screen>('news')   // açılış: Gündem
+// Sekmeler tek kaynak: TAB_SCREENS + HOME_SCREEN
+type TabId = 'discover' | 'evrimagaci' | 'hn' | 'news'
+const TAB_SCREENS: TabId[] = ['discover', 'evrimagaci', 'hn', 'news']
+const HOME_SCREEN: Screen = 'discover'   // açılış: Keşfet (Makaleler)
+
+const [screen, setScreen] = useState<Screen>(HOME_SCREEN)
 ```
 
 ### Geri Butonu Mantığı
 
 ```typescript
 const handleBack = () => {
-    if (screen === 'detail')        → 'results' veya 'saved' (prevTab'a göre)
-    if (screen === 'results')       → 'news'
-    if (screen === 'hnReader')      → 'hn'
     if (screen === 'webview')       → prevScreen (dinamik)
-    if (screen === 'offlineReader') → 'saved'
-    if (screen === 'settings')      → prevTab
-    else                            → 'news'
+    if (screen === 'detail')        → detailOrigin (kayıtlılardan açıldıysa 'saved')
+    if (screen === 'settings' ||
+        screen === 'saved' ||
+        screen === 'profile')       → menuOrigin (menünün açıldığı sekme)
+    if (screen === 'hnReader')      → 'hn'
+    if (screen === 'results')       → searchOrigin (arama yapılan sekme)
+    else                            → HOME_SCREEN
 }
 ```
+
+Menü açıkken geri tuşu önce menüyü kapatır, ekran değiştirmez.
 
 ### Android Hardware Back Button
 
 ```typescript
 useEffect(() => {
     BackHandler.addEventListener('hardwareBackPress', () => {
-        if (screen === 'news') return false  // Uygulamadan çıkışa izin ver
+        if (menuOpen) { setMenuOpen(false); return true }   // önce menüyü kapat
+        if (screen === HOME_SCREEN) return false            // uygulamadan çıkış
         handleBack()
-        return true                          // Çıkışı engelle
+        return true
     })
-}, [screen])
+}, [screen, menuOpen])
 ```
 
 ### Tab Bar
@@ -633,12 +765,13 @@ useEffect(() => {
 Dört sekme vardır ve tab bar yalnızca bu ekranlarda gösterilir:
 
 ```typescript
-type TabId = 'news' | 'hn' | 'evrimagaci' | 'saved'
-const showTab = ['news', 'hn', 'evrimagaci', 'saved'].includes(screen)
+type TabId = 'discover' | 'evrimagaci' | 'hn' | 'news'
+const showTab = TAB_SCREENS.includes(screen)
 ```
 
-**Ayarlar ve Profil sekme değildir** — Gündem başlığındaki iki ikon butondan
-açılır (`onOpenSettings` / `onOpenProfile`).
+**Kayıtlılar, Ayarlar ve Profil sekme değildir** — hamburger menüden (☰)
+açılır. Menü her sekme ekranının sağ üst köşesindedir.
+
 ```
 
 ---
