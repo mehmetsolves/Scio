@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import {
     View,
     Text,
@@ -196,6 +196,23 @@ export default function HNScreen({
     const [searchQuery, setSearchQuery] = useState('')
     const [searchFocused, setSearchFocused] = useState(false)
 
+    // Ardışık append'ler aynı öğeyi tekrar ekleyebiliyordu (React'a
+    // "Encountered two children with the same key" hatası bastıran sebepti).
+    // HN item id'leri zorunlu olarak benzersiz olduğundan, liste tek merkezden
+    // dedup'lanarak büyütülüyor.
+    const appendItems = useCallback((incoming: HNItem[]) => {
+        setItems((prev) => {
+            if (incoming.length === 0) return prev
+            const seen = new Set(prev.map((it) => it.id))
+            const fresh = incoming.filter((it) => {
+                if (seen.has(it.id)) return false
+                seen.add(it.id)
+                return true
+            })
+            return fresh.length === 0 ? prev : [...prev, ...fresh]
+        })
+    }, [])
+
     const loadFeed = useCallback(async (selectedFeed: HNFeed, isRefresh = false) => {
         if (isRefresh) setRefreshing(true)
         else setLoading(true)
@@ -209,17 +226,17 @@ export default function HNScreen({
                 return
             }
 
-            // İlk parti gelince loading'i kapat: kullanıcı ~200 ms'de içerik görür.
-            // Devam eden partiler arka planda eklenir.
+            // İlk parti gelince loading'i kapat: kullanıcı ~200 ms'de içerik
+            // görür. Önceki feed'in öğeleri tamamen temizlenir (feed
+            // değişiminde eski öğeler sayfada kalıyordu).
             const first = await fetchItems(ids.slice(0, FIRST_BATCH))
-            setItems(first)
+            setItems([])
+            appendItems(first)
             setLoading(false)
 
             const rest = ids.slice(FIRST_BATCH, FIRST_BATCH + 45)
             if (rest.length > 0) {
-                await fetchItemsProgressive(rest, (batch) => {
-                    setItems((prev) => [...prev, ...batch])
-                }, NEXT_BATCH)
+                await fetchItemsProgressive(rest, appendItems, NEXT_BATCH)
             }
         } catch {
             setItems([])
@@ -227,7 +244,7 @@ export default function HNScreen({
             setLoading(false)
             setRefreshing(false)
         }
-    }, [])
+    }, [appendItems])
 
     useEffect(() => {
         loadFeed(feed)
@@ -235,7 +252,18 @@ export default function HNScreen({
 
     // Açtıktan hemen sonra filtrelenecek Türkçe sorgular çok sonuç bulmayıp
     // görüneni boşaltabilir. Sorgu uzunluğuna göre aramayı yapmaya devam et.
-    const displayItems = filterByDate(filterHN(items, searchQuery), dateFilter)
+    // id'ye göre tekilleştirme, React'ın "two children with the same key"
+    // hatasını kalıcı olarak engeller: arka plandaki append'ler, feed/reload
+    // çakışmaları veya iki kez çalışan yükleme aynı öğeyi listeye iki kez
+    // sokabiliyordu.
+    const displayItems = useMemo(() => {
+        const seen = new Set<number>()
+        return filterByDate(filterHN(items, searchQuery), dateFilter).filter((item) => {
+            if (seen.has(item.id)) return false
+            seen.add(item.id)
+            return true
+        })
+    }, [items, searchQuery, dateFilter])
 
     const FEED_TABS: { key: HNFeed; label: string }[] = [
         { key: 'top', label: 'En İyi' },
@@ -400,7 +428,7 @@ export default function HNScreen({
                             </Text>
                         </View>
                     ) : (
-                        displayItems.map((item, idx) => (
+                        displayItems.map((item, idx: number) => (
                             <HNCard
                                 key={item.id}
                                 item={item}
