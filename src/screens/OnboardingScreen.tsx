@@ -55,6 +55,9 @@ export default function OnboardingScreen({
                             <Pressable
                                 key={topic}
                                 onPress={() => toggle(topic)}
+                                accessibilityLabel={topic}
+                                accessibilityRole="checkbox"
+                                accessibilityState={{ checked: isSelected }}
                                 style={[
                                     s.chip,
                                     {
@@ -80,6 +83,13 @@ export default function OnboardingScreen({
                     <Pressable
                         onPress={handleContinue}
                         disabled={selected.length === 0}
+                        accessibilityLabel={
+                            selected.length > 0
+                                ? `${selected.length} konu seçildi, devam et`
+                                : 'En az bir konu seçin'
+                        }
+                        accessibilityRole="button"
+                        accessibilityState={{ disabled: selected.length === 0 }}
                         style={[
                             s.btn,
                             {

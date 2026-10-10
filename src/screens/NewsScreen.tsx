@@ -20,6 +20,7 @@ import {
     type NewsSourceId,
 } from '../api/news'
 import { useDownloads } from '../store/DownloadsContext'
+import { useSettings } from '../store/SettingsContext'
 import type { ColorScheme } from '../theme/colors'
 
 const SERIF_BOLD = 'SourceSerif4_700Bold'
@@ -54,6 +55,7 @@ export default function NewsScreen({
     const [focused, setFocused] = useState(false)
     const [query, setQuery] = useState('')
     const { downloadArticle, isDownloaded } = useDownloads()
+    const { selectedTopics } = useSettings()
     const [downloadingId, setDownloadingId] = useState<string | null>(null)
 
     useEffect(() => {
@@ -101,6 +103,8 @@ export default function NewsScreen({
                         <Pressable
                             onPress={onOpenProfile}
                             hitSlop={8}
+                            accessibilityLabel="Profil"
+                            accessibilityRole="button"
                             style={[s.iconBtn, { borderColor: colors.border }]}
                         >
                             <Ionicons name="person-outline" size={18} color={colors.muted} />
@@ -108,6 +112,8 @@ export default function NewsScreen({
                         <Pressable
                             onPress={onOpenSettings}
                             hitSlop={8}
+                            accessibilityLabel="Ayarlar"
+                            accessibilityRole="button"
                             style={[s.iconBtn, { borderColor: colors.border }]}
                         >
                             <Ionicons name="settings-outline" size={18} color={colors.muted} />
@@ -143,11 +149,39 @@ export default function NewsScreen({
                         style={[s.searchInput, { color: colors.ink }]}
                     />
                     {query.length > 0 && (
-                        <Pressable onPress={() => setQuery('')} hitSlop={8}>
+                        <Pressable
+                            onPress={() => setQuery('')}
+                            hitSlop={8}
+                            accessibilityLabel="Aramayı temizle"
+                            accessibilityRole="button"
+                        >
                             <Ionicons name="close-circle" size={17} color={colors.mutedLight} />
                         </Pressable>
                     )}
                 </View>
+
+                {/* İlgi alanları — onboarding'de seçilen konular. Boşsa hiç
+                    gösterilmez; seçim varsa tek dokunuşla o konuyu arar. */}
+                {selectedTopics.length > 0 && (
+                    <ScrollView
+                        horizontal
+                        showsHorizontalScrollIndicator={false}
+                        style={{ marginTop: 12 }}
+                        contentContainerStyle={{ paddingRight: 8 }}
+                    >
+                        {selectedTopics.map((topic) => (
+                            <Pressable
+                                key={topic}
+                                onPress={() => onSearch(topic)}
+                                accessibilityLabel={`${topic} konusunda ara`}
+                                accessibilityRole="button"
+                                style={[s.topicChip, { borderColor: colors.inputBorder }]}
+                            >
+                                <Text style={[s.topicChipText, { color: colors.muted }]}>{topic}</Text>
+                            </Pressable>
+                        ))}
+                    </ScrollView>
+                )}
 
                 {/* Kaynak filtresi */}
                 <ScrollView
@@ -287,6 +321,10 @@ export default function NewsScreen({
                                             }}
                                             hitSlop={10}
                                             disabled={downloading}
+                                            accessibilityLabel={
+                                                alreadySaved ? 'İndirildi' : downloading ? 'İndiriliyor' : 'Çevrimdışı için indir'
+                                            }
+                                            accessibilityRole="button"
                                             style={s.saveBtn}
                                         >
                                             <Ionicons
@@ -367,6 +405,18 @@ const s = StyleSheet.create({
         paddingHorizontal: 13,
         paddingVertical: 6,
         marginRight: 8,
+    },
+    topicChip: {
+        borderWidth: 1,
+        borderRadius: 14,
+        borderStyle: 'dashed',
+        paddingHorizontal: 11,
+        paddingVertical: 5,
+        marginRight: 8,
+    },
+    topicChipText: {
+        fontFamily: SANS_MEDIUM,
+        fontSize: 12,
     },
     filterChipText: {
         fontFamily: SANS_SEMIBOLD,

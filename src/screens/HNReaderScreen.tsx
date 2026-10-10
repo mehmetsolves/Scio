@@ -85,7 +85,13 @@ export default function HNReaderScreen({
             {/* Nav Bar */}
             <View style={[s.navBar, { borderBottomColor: colors.border, backgroundColor: colors.cream }]}>
                 <View style={s.navRow}>
-                    <Pressable onPress={onBack} hitSlop={8} style={{ padding: 6 }}>
+                    <Pressable
+                        onPress={onBack}
+                        hitSlop={8}
+                        accessibilityLabel="Geri"
+                        accessibilityRole="button"
+                        style={{ padding: 6 }}
+                    >
                         <Text style={[s.backArrow, { color: HN_ORANGE }]}>←</Text>
                     </Pressable>
                     <View style={[s.hnBadge, { backgroundColor: HN_ORANGE }]}>
@@ -99,6 +105,8 @@ export default function HNReaderScreen({
                         <Pressable
                             onPress={() => Linking.openURL(item.url!)}
                             hitSlop={8}
+                            accessibilityLabel="Tarayıcıda aç"
+                            accessibilityRole="link"
                             style={{ padding: 4 }}
                         >
                             <Text style={{ color: HN_ORANGE, fontSize: 14 }}>↗</Text>
@@ -120,6 +128,10 @@ export default function HNReaderScreen({
                                     .finally(() => setDownloading(false))
                             }}
                             hitSlop={8}
+                            accessibilityLabel={
+                                isDownloaded(dlId) ? 'İndirildi' : downloading ? 'İndiriliyor' : 'Çevrimdışı için indir'
+                            }
+                            accessibilityRole="button"
                             style={{ marginLeft: 4, padding: 4 }}
                         >
                             <Ionicons
@@ -132,6 +144,8 @@ export default function HNReaderScreen({
                     <Pressable
                         onPress={() => toggleHNSave(item)}
                         hitSlop={8}
+                        accessibilityLabel={isHNSaved(item.id) ? 'Kaydedildi, kaldır' : 'Kaydet'}
+                        accessibilityRole="button"
                         style={{ marginLeft: 8, padding: 4 }}
                     >
                         <Ionicons
@@ -198,6 +212,8 @@ export default function HNReaderScreen({
                         setTranslated((v) => !v)
                         if (item.url) setLoading(true)
                     }}
+                    accessibilityLabel={translated ? 'Orijinal dili göster' : 'Türkçeye çevir'}
+                    accessibilityRole="button"
                     style={s.langToggle}
                 >
                     <Text style={{ fontSize: 14 }}>{translated ? '🇬🇧' : '🇹🇷'}</Text>

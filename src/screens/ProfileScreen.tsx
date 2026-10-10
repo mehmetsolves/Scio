@@ -31,7 +31,13 @@ export default function ProfileScreen({ colors, onBack }: { colors: ColorScheme;
         <ScrollView style={{ flex: 1, backgroundColor: colors.cream }}>
             <View style={[s.header, { flexDirection: 'row', alignItems: 'center', gap: 12 }]}>
                 {onBack && (
-                    <Pressable onPress={onBack} hitSlop={10} style={s.backBtn}>
+                    <Pressable
+                        onPress={onBack}
+                        hitSlop={10}
+                        accessibilityLabel="Geri"
+                        accessibilityRole="button"
+                        style={s.backBtn}
+                    >
                         <Ionicons name="arrow-back" size={20} color={colors.ink} />
                     </Pressable>
                 )}

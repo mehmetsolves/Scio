@@ -71,6 +71,8 @@ export default function EvrimAgaciScreen({
                     <Pressable
                         onPress={() => loadArticles(true)}
                         hitSlop={6}
+                        accessibilityLabel="Makaleleri yenile"
+                        accessibilityRole="button"
                         style={[s.iconBtn, { borderColor: colors.border, backgroundColor: colors.card }]}
                     >
                         <Ionicons name="refresh" size={15} color={colors.muted} />
@@ -155,6 +157,10 @@ export default function EvrimAgaciScreen({
                                                 }}
                                                 hitSlop={10}
                                                 disabled={downloading}
+                                                accessibilityLabel={
+                                                    saved ? 'İndirildi' : downloading ? 'İndiriliyor' : 'Çevrimdışı için indir'
+                                                }
+                                                accessibilityRole="button"
                                                 style={s.actionBtn}
                                             >
                                                 <Ionicons
@@ -169,6 +175,8 @@ export default function EvrimAgaciScreen({
                                                     toggleEvrimSave(article)
                                                 }}
                                                 hitSlop={10}
+                                                accessibilityLabel={liked ? 'Kaydedildi, kaldır' : 'Makaleyi kaydet'}
+                                                accessibilityRole="button"
                                                 style={s.actionBtn}
                                             >
                                                 <Ionicons

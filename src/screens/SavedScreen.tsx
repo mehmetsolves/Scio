@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { View, Text, ScrollView, Pressable, StyleSheet, Alert } from 'react-native'
+
 import Ionicons from '@expo/vector-icons/Ionicons'
 import { useSavedArticles, type ReadingStatus, type SavedArticleEntry, type SavedHNEntry, type SavedEvrimEntry } from '../store/SavedArticlesContext'
 import { useDownloads, type DownloadedArticle } from '../store/DownloadsContext'
@@ -25,6 +26,15 @@ const TABS: { id: SavedTab; icon: keyof typeof Ionicons.glyphMap; label: string 
     { id: 'liked', icon: 'thumbs-up-outline', label: 'Beğendim' },
     { id: 'disliked', icon: 'thumbs-down-outline', label: 'Beğenmedim' },
 ]
+
+// Silme geri alınamaz (indirilenlerde saatlerce süren çeviri de gider), ama
+// yanlışlıkla bir dokunuş yetiyordu. Tek yardımcıda toplu onay eklendi.
+function confirmDelete(title: string, message: string, onConfirm: () => void) {
+    Alert.alert(title, message, [
+        { text: 'Vazgeç', style: 'cancel' },
+        { text: 'Sil', style: 'destructive', onPress: onConfirm },
+    ])
+}
 
 function SourceBadge({ source }: { source: string }) {
     const key = source.toLowerCase().replace(/\s/g, '') as keyof typeof SOURCE_META
@@ -177,6 +187,9 @@ export default function SavedScreen({
                         <Pressable
                             key={tab.id}
                             onPress={() => setActiveTab(tab.id)}
+                            accessibilityLabel={`${tab.label} (${count})`}
+                            accessibilityRole="tab"
+                            accessibilityState={{ selected: isActive }}
                             style={[
                                 s.tab,
                                 isActive && { borderBottomColor: colors.burgundy, borderBottomWidth: 2 },
@@ -245,8 +258,14 @@ export default function SavedScreen({
                                                 <Text style={[s.badgeText, { color: colors.burgundy }]}>Offline</Text>
                                             </View>
                                             <Pressable
-                                                onPress={() => removeDownload(entry.id)}
+                                                onPress={() => confirmDelete(
+                                                    'İndirileni sil',
+                                                    'Bu makalenin çevrimdışı kopyası ve çevirisi silinecek. Çevrimdışı okunamayacak.',
+                                                    () => removeDownload(entry.id),
+                                                )}
                                                 hitSlop={10}
+                                                accessibilityLabel="İndirilen makaleyi sil"
+                                                accessibilityRole="button"
                                                 style={s.removeBtn}
                                             >
                                                 <Ionicons name="close" size={15} color={colors.muted} />
@@ -293,8 +312,14 @@ export default function SavedScreen({
                                                     <StatusBadge status={entry.status} />
                                                 </View>
                                                 <Pressable
-                                                    onPress={() => removeArticle(entry.article.id)}
+                                                    onPress={() => confirmDelete(
+                                                        'Makaleyi sil',
+                                                        'Bu makale kaydedilenlerden çıkarılacak. Çevirisi de silinecek.',
+                                                        () => removeArticle(entry.article.id),
+                                                    )}
                                                     hitSlop={10}
+                                                    accessibilityLabel="Kaydedilen makaleyi sil"
+                                                    accessibilityRole="button"
                                                     style={s.removeBtn}
                                                 >
                                                     <Ionicons name="close" size={15} color={colors.muted} />
@@ -338,8 +363,14 @@ export default function SavedScreen({
                                                 <StatusBadge status={entry.status} />
                                             </View>
                                             <Pressable
-                                                onPress={() => removeEvrimArticle(entry.article.id)}
+                                                onPress={() => confirmDelete(
+                                                    'Makaleyi sil',
+                                                    'Bu Evrim Ağacı makalesi kaydedilenlerden çıkarılacak.',
+                                                    () => removeEvrimArticle(entry.article.id),
+                                                )}
                                                 hitSlop={10}
+                                                accessibilityLabel="Kaydedilen makaleyi sil"
+                                                accessibilityRole="button"
                                                 style={s.removeBtn}
                                             >
                                                 <Ionicons name="close" size={15} color={colors.muted} />
@@ -382,8 +413,14 @@ export default function SavedScreen({
                                                 <StatusBadge status={entry.status} />
                                             </View>
                                             <Pressable
-                                                onPress={() => removeHNItem(entry.item.id)}
+                                                onPress={() => confirmDelete(
+                                                    'Haber öğesini sil',
+                                                    'Bu Hacker News öğesi kaydedilenlerden çıkarılacak.',
+                                                    () => removeHNItem(entry.item.id),
+                                                )}
                                                 hitSlop={10}
+                                                accessibilityLabel="Kaydedilen Hacker News öğesini sil"
+                                                accessibilityRole="button"
                                                 style={s.removeBtn}
                                             >
                                                 <Ionicons name="close" size={15} color={colors.muted} />

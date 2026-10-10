@@ -142,6 +142,14 @@ function HNCard({
                                         .finally(() => setDownloading(false))
                                 }}
                                 hitSlop={10}
+                                accessibilityLabel={
+                                    isDownloaded(dlId)
+                                        ? 'İndirildi'
+                                        : downloading
+                                            ? 'İndiriliyor'
+                                            : 'Çevrimdışı için indir'
+                                }
+                                accessibilityRole="button"
                                 style={s.dlBtn}
                             >
                                 <Ionicons
@@ -217,6 +225,8 @@ export default function HNScreen({
                 <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
                     <Pressable
                         onPress={() => setShowDatePicker(!showDatePicker)}
+                        accessibilityLabel={`Tarih filtresi: ${dateLabel}`}
+                        accessibilityRole="button"
                         style={[s.dateBtn, { borderColor: colors.border, backgroundColor: colors.card }]}
                     >
                         <Ionicons name="calendar-outline" size={13} color={colors.muted} />
@@ -226,6 +236,8 @@ export default function HNScreen({
                     <Pressable
                         onPress={() => loadFeed(feed, true)}
                         hitSlop={6}
+                        accessibilityLabel="Akışı yenile"
+                        accessibilityRole="button"
                         style={[s.refreshBtn, { borderColor: colors.border, backgroundColor: colors.card }]}
                     >
                         <Ionicons name="refresh" size={15} color={colors.muted} />

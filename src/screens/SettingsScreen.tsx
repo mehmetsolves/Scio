@@ -63,7 +63,13 @@ export default function SettingsScreen({ colors, onBack }: { colors: ColorScheme
         <ScrollView style={{ flex: 1, backgroundColor: colors.cream }}>
             <View style={[s.header, { flexDirection: 'row', alignItems: 'center', gap: 12 }]}>
                 {onBack && (
-                    <Pressable onPress={onBack} hitSlop={10} style={s.backBtn}>
+                    <Pressable
+                        onPress={onBack}
+                        hitSlop={10}
+                        accessibilityLabel="Geri"
+                        accessibilityRole="button"
+                        style={s.backBtn}
+                    >
                         <Ionicons name="arrow-back" size={20} color={colors.ink} />
                     </Pressable>
                 )}
@@ -80,6 +86,7 @@ export default function SettingsScreen({ colors, onBack }: { colors: ColorScheme
                             <Switch
                                 value={sources.includes(src)}
                                 onValueChange={() => toggleSource(src)}
+                                accessibilityLabel={`${SOURCE_LABELS[src]} kaynağı`}
                                 trackColor={{ false: colors.inputBorder, true: colors.burgundy }}
                                 thumbColor={colors.card}
                             />
@@ -95,6 +102,7 @@ export default function SettingsScreen({ colors, onBack }: { colors: ColorScheme
                         <Switch
                             value={darkMode}
                             onValueChange={setDarkMode}
+                            accessibilityLabel="Koyu tema"
                             trackColor={{ false: colors.inputBorder, true: colors.burgundy }}
                             thumbColor={colors.card}
                         />

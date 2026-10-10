@@ -54,7 +54,13 @@ export default function ArticleWebViewScreen({
             {/* Nav */}
             <View style={[s.navBar, { borderBottomColor: colors.border, backgroundColor: colors.cream }]}>
                 <View style={s.navRow}>
-                    <Pressable onPress={onBack} hitSlop={8} style={{ padding: 6 }}>
+                    <Pressable
+                        onPress={onBack}
+                        hitSlop={8}
+                        accessibilityLabel="Geri"
+                        accessibilityRole="button"
+                        style={{ padding: 6 }}
+                    >
                         <Text style={[s.backArrow, { color: colors.burgundy }]}>←</Text>
                     </Pressable>
                     <Text style={[s.navTitle, { color: colors.ink }]} numberOfLines={1}>
@@ -89,6 +95,8 @@ export default function ArticleWebViewScreen({
                     setTranslated((v) => !v)
                     setLoading(true)
                 }}
+                accessibilityLabel={translated ? 'Orijinal dili göster' : 'Türkçeye çevir'}
+                accessibilityRole="button"
                 style={s.langToggle}
             >
                 <Text style={{ fontSize: 14 }}>{translated ? '🇬🇧' : '🇹🇷'}</Text>

@@ -37,7 +37,13 @@ export default function OfflineReaderScreen({
             {/* Nav */}
             <View style={[s.navBar, { borderBottomColor: colors.border, backgroundColor: colors.cream }]}>
                 <View style={s.navRow}>
-                    <Pressable onPress={onBack} hitSlop={8} style={{ padding: 6 }}>
+                    <Pressable
+                        onPress={onBack}
+                        hitSlop={8}
+                        accessibilityLabel="Geri"
+                        accessibilityRole="button"
+                        style={{ padding: 6 }}
+                    >
                         <Text style={[s.backArrow, { color: colors.burgundy }]}>←</Text>
                     </Pressable>
                     <Text style={[s.navTitle, { color: colors.ink }]} numberOfLines={1}>
@@ -46,6 +52,8 @@ export default function OfflineReaderScreen({
                     <Pressable
                         onPress={toggleLang}
                         hitSlop={8}
+                        accessibilityLabel={isTrShown ? 'Orijinal dili göster' : 'Türkçe çeviriyi göster'}
+                        accessibilityRole="button"
                         style={[s.langChip, { backgroundColor: colors.burgundyTint }]}
                     >
                         <Text style={{ fontSize: 13 }}>{isTrShown ? '🇬🇧' : '🇹🇷'}</Text>

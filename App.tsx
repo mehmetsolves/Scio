@@ -211,7 +211,13 @@ function ResultsScreen({
         <View style={{ flex: 1, backgroundColor: colors.cream }}>
             <View style={[styles.navBar, { borderBottomColor: colors.border, backgroundColor: colors.cream }]}>
                 <View style={styles.row}>
-                    <Pressable onPress={onBack} hitSlop={8} style={{ padding: 6 }}>
+                    <Pressable
+                        onPress={onBack}
+                        hitSlop={8}
+                        accessibilityLabel="Geri"
+                        accessibilityRole="button"
+                        style={{ padding: 6 }}
+                    >
                         <Text style={[styles.backArrow, { color: colors.burgundy }]}>←</Text>
                     </Pressable>
                     <View style={[styles.queryPill, { backgroundColor: colors.card, borderColor: colors.border }]}>
@@ -472,7 +478,13 @@ function DetailScreen({
         <View style={{ flex: 1, backgroundColor: colors.cream }}>
             <View style={[styles.navBar, { borderBottomColor: colors.border, backgroundColor: colors.cream }]}>
                 <View style={styles.row}>
-                    <Pressable onPress={onBack} hitSlop={8} style={{ padding: 6 }}>
+                    <Pressable
+                        onPress={onBack}
+                        hitSlop={8}
+                        accessibilityLabel="Geri"
+                        accessibilityRole="button"
+                        style={{ padding: 6 }}
+                    >
                         <Text style={[styles.backArrow, { color: colors.burgundy }]}>←</Text>
                     </Pressable>
                     <SourceBadge source={article.source} />
@@ -480,6 +492,8 @@ function DetailScreen({
                     <Pressable
                         onPress={() => toggleSave(article, titleTr || undefined, abstractTr || undefined)}
                         hitSlop={8}
+                        accessibilityLabel={isSaved(article.id) ? 'Kaydedildi, kaldır' : 'Makaleyi kaydet'}
+                        accessibilityRole="button"
                         style={{ marginLeft: 8, padding: 4 }}
                     >
                         <Ionicons
@@ -504,6 +518,10 @@ function DetailScreen({
                                     .finally(() => setDownloading(false))
                             }}
                             hitSlop={8}
+                            accessibilityLabel={
+                                isDownloaded(article.id) ? 'İndirildi' : downloading ? 'İndiriliyor' : 'Çevrimdışı için indir'
+                            }
+                            accessibilityRole="button"
                             style={{ marginLeft: 4, padding: 4 }}
                             disabled={downloading}
                         >
@@ -598,6 +616,8 @@ function DetailScreen({
                     {article.url ? (
                         <Pressable
                             onPress={() => onOpenUrl(article.url, article.title)}
+                            accessibilityLabel="Orijinal makaleyi görüntüle"
+                            accessibilityRole="link"
                             style={{ marginTop: 20 }}
                         >
                             <Text style={[styles.linkText, { color: colors.burgundy }]}>
@@ -612,6 +632,9 @@ function DetailScreen({
             <Pressable
                 onPress={switchLang}
                 disabled={translating && lang === 'en'}
+                accessibilityLabel={lang === 'tr' ? 'İngilizce göster' : 'Türkçe göster'}
+                accessibilityRole="button"
+                accessibilityState={{ disabled: translating && lang === 'en' }}
                 style={[styles.langToggle, { opacity: translating && lang === 'en' ? 0.5 : 1 }]}
             >
                 <Text style={{ fontSize: 14 }}>{lang === 'tr' ? '🇬🇧' : '🇹🇷'}</Text>
@@ -660,6 +683,9 @@ function TabBar({
                     <Pressable
                         key={tab.id}
                         onPress={() => onTab(tab.id)}
+                        accessibilityLabel={tab.label}
+                        accessibilityRole="tab"
+                        accessibilityState={{ selected: isActive }}
                         style={styles.tabItem}
                         hitSlop={{ top: 6, bottom: 6 }}
                     >

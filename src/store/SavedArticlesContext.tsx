@@ -29,11 +29,10 @@ export interface SavedEvrimEntry {
 }
 
 interface SavedArticlesContextValue {
-    // Legacy accessors (backward compatible)
+    // Düz makale listesi (ProfileScreen istatistikleri için)
     savedArticles: Article[]
-    savedHNItems: HNItem[]
 
-    // New entry-based accessors
+    // Entry tabanlı erişim
     savedArticleEntries: SavedArticleEntry[]
     savedHNEntries: SavedHNEntry[]
     savedEvrimEntries: SavedEvrimEntry[]
@@ -57,11 +56,6 @@ interface SavedArticlesContextValue {
     setArticleStatus: (id: string, status: ReadingStatus) => void
     setHNStatus: (id: number, status: ReadingStatus) => void
     setEvrimStatus: (id: string, status: ReadingStatus) => void
-
-    // Filter by status
-    getArticlesByStatus: (status: ReadingStatus) => SavedArticleEntry[]
-    getHNByStatus: (status: ReadingStatus) => SavedHNEntry[]
-    getEvrimByStatus: (status: ReadingStatus) => SavedEvrimEntry[]
 
     // Update translation cache
     updateTranslation: (id: string, titleTr: string, abstractTr: string) => void
@@ -288,16 +282,6 @@ export function SavedArticlesProvider({ children }: { children: ReactNode }) {
         })
     }
 
-    // ── Filter by status ──
-    const getArticlesByStatus = (status: ReadingStatus) =>
-        articleEntries.filter((e) => e.status === status)
-
-    const getHNByStatus = (status: ReadingStatus) =>
-        hnEntries.filter((e) => e.status === status)
-
-    const getEvrimByStatus = (status: ReadingStatus) =>
-        evrimEntries.filter((e) => e.status === status)
-
     // ── Update translation cache ──
     const updateTranslation = (id: string, titleTr: string, abstractTr: string) => {
         setArticleEntries((prev) => {
@@ -309,13 +293,11 @@ export function SavedArticlesProvider({ children }: { children: ReactNode }) {
         })
     }
 
-    // Legacy accessors for backward compatibility
     const savedArticles = articleEntries.map((e) => e.article)
-    const savedHNItems = hnEntries.map((e) => e.item)
 
     return (
         <SavedArticlesContext.Provider value={{
-            savedArticles, savedHNItems,
+            savedArticles,
             savedArticleEntries: articleEntries,
             savedHNEntries: hnEntries,
             savedEvrimEntries: evrimEntries,
@@ -323,7 +305,6 @@ export function SavedArticlesProvider({ children }: { children: ReactNode }) {
             toggleSave, toggleHNSave, toggleEvrimSave,
             removeArticle, removeHNItem, removeEvrimArticle,
             setArticleStatus, setHNStatus, setEvrimStatus,
-            getArticlesByStatus, getHNByStatus, getEvrimByStatus,
             updateTranslation,
             ready,
         }}>
