@@ -833,6 +833,16 @@ function AppInner() {
         return () => sub.remove()
     }, [screen, handleBack, menuOpen])
 
+    // NOT: Bu hook, aşağıdaki `if (!fontsLoaded || !ready) return null` ve
+    // `if (!hasCompletedOnboarding) return (...)` erken çıkışlarından ÖNCE
+    // olmalı. Erken çıkıştan sonra bırakılırsa React "Rendered more hooks
+    // than during the previous render" hatası verir: ilk render'da hook
+    // hiç çalışmayıp, `ready` true olduktan sonra çalışmaya başlar.
+    const visibleTabs = useMemo<TabId[]>(
+        () => TAB_SCREENS.filter((t) => !hiddenTabs.includes(t)),
+        [hiddenTabs],
+    )
+
     if (!fontsLoaded || !ready) return null
 
     const handleSearch = (q: string, mode: 'academic' | 'news' = 'academic') => {
@@ -902,12 +912,6 @@ function AppInner() {
 
     // Sekme ekranlarının her biri menü düğmesini kendi başlığına alıyor.
     const openMenuFromTab = () => openMenu()
-
-    // Ayarlardan kapatılmayan kategoriler. Boşsa tüm sekmeler gösterilir.
-    const visibleTabs: TabId[] = useMemo(
-        () => TAB_SCREENS.filter((t) => hiddenTabs.includes(t) === false),
-        [hiddenTabs],
-    )
 
     return (
         <SafeAreaProvider>
