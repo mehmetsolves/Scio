@@ -11,16 +11,20 @@ import {
     Alert,
 } from 'react-native'
 import Ionicons from '@expo/vector-icons/Ionicons'
+import { MenuButton } from './HamburgerMenu'
 import {
     fetchAllNews,
     formatNewsDate,
     getNewsSourceMeta,
     NEWS_SOURCES,
+    FALLBACK_SOURCE_META,
     type NewsArticle,
+    type NewsSource,
     type NewsSourceId,
 } from '../api/news'
 import { useDownloads } from '../store/DownloadsContext'
 import { useSettings } from '../store/SettingsContext'
+import { useCustomSources } from '../store/CustomSourcesContext'
 import type { ColorScheme } from '../theme/colors'
 
 const SERIF_BOLD = 'SourceSerif4_700Bold'
@@ -38,14 +42,12 @@ export default function NewsScreen({
     colors,
     onOpenUrl,
     onSearch,
-    onOpenSettings,
-    onOpenProfile,
+    onOpenMenu,
 }: {
     colors: ColorScheme
     onOpenUrl: (url: string, title: string) => void
     onSearch: (q: string) => void
-    onOpenSettings: () => void
-    onOpenProfile: () => void
+    onOpenMenu: () => void
 }) {
     const [articles, setArticles] = useState<NewsArticle[]>([])
     const [loading, setLoading] = useState(true)
@@ -56,7 +58,12 @@ export default function NewsScreen({
     const [query, setQuery] = useState('')
     const { downloadArticle, isDownloaded } = useDownloads()
     const { selectedTopics } = useSettings()
+    const { customSources } = useCustomSources()
     const [downloadingId, setDownloadingId] = useState<string | null>(null)
+
+    // Haber filtresi: kullanıcının eklediği özel kaynaklar + gömülü kaynaklar.
+    // Arama sonuçları, detay göstergeler ve rozetler bu birleşik listeden gelir.
+    const allSources: NewsSource[] = [...NEWS_SOURCES, ...customSources]
 
     useEffect(() => {
         loadNews()
@@ -100,24 +107,7 @@ export default function NewsScreen({
                         </Text>
                     </View>
                     <View style={{ flexDirection: 'row', gap: 8 }}>
-                        <Pressable
-                            onPress={onOpenProfile}
-                            hitSlop={8}
-                            accessibilityLabel="Profil"
-                            accessibilityRole="button"
-                            style={[s.iconBtn, { borderColor: colors.border }]}
-                        >
-                            <Ionicons name="person-outline" size={18} color={colors.muted} />
-                        </Pressable>
-                        <Pressable
-                            onPress={onOpenSettings}
-                            hitSlop={8}
-                            accessibilityLabel="Ayarlar"
-                            accessibilityRole="button"
-                            style={[s.iconBtn, { borderColor: colors.border }]}
-                        >
-                            <Ionicons name="settings-outline" size={18} color={colors.muted} />
-                        </Pressable>
+                        {onOpenMenu && <MenuButton onPress={onOpenMenu} colors={colors} />}
                     </View>
                 </View>
 
@@ -258,7 +248,11 @@ export default function NewsScreen({
                     </Text>
 
                     {filteredArticles.map((article) => {
-                        const srcMeta = getNewsSourceMeta(article.source)
+                        // Kullanıcının eklediği özel kaynaklarda varsayılan
+                        // metaya düşüş gerekir; getNewsSourceMeta artık
+                        // bilinmeyen id için undefined döndürüyor.
+                        const srcMeta = getNewsSourceMeta(article.source, allSources)
+                        const sourceColor = srcMeta?.color ?? FALLBACK_SOURCE_META.color
                         const alreadySaved = isDownloaded(article.id)
                         const downloading = downloadingId === article.id
                         return (
@@ -274,12 +268,12 @@ export default function NewsScreen({
                                 ]}
                             >
                                 {/* Kaynak şeridi — kartın solunda kaynak rengi */}
-                                <View style={[s.accent, { backgroundColor: srcMeta.color }]} />
+                                <View style={[s.accent, { backgroundColor: sourceColor }]} />
 
                                 <View style={s.cardInner}>
                                     <View style={s.cardHeader}>
-                                        <Text style={[s.sourceText, { color: srcMeta.color }]}>
-                                            {srcMeta.label}
+                                        <Text style={[s.sourceText, { color: sourceColor }]}>
+                                            {srcMeta?.label ?? article.source}
                                         </Text>
                                         <Text style={[s.timeText, { color: colors.mutedLight }]}>
                                             {formatNewsDate(article.pubDate)}

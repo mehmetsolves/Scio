@@ -7,17 +7,12 @@ const SANS = 'Inter_400Regular'
 const SANS_MEDIUM = 'Inter_500Medium'
 const SANS_SEMIBOLD = 'Inter_600SemiBold'
 
-const TOPICS = [
-    'Teknoloji',
-    'Bilim',
-    'Yapay Zeka',
-    'Felsefe',
-    'Matematik',
-    'Psikoloji',
-    'Tarih',
-    'Ekonomi',
-    'Spor',
-]
+// Konu listesi src/api/topics.ts'te tek kaynakta tutuluyor: her konunun
+// kullanıcıya görünen etiketi (Türkçe) ve akademik arama terimi (İngilizce)
+// aynı yerde. Keşfet ekranı da bu listeyi kullandığı için ikisi ayrışamaz.
+import { TOPICS as TOPIC_DEFS } from '../api/topics'
+
+const TOPICS = TOPIC_DEFS.map((t) => t.label)
 
 export default function OnboardingScreen({
     colors,

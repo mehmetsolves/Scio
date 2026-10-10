@@ -10,6 +10,7 @@ import {
     Alert,
 } from 'react-native'
 import Ionicons from '@expo/vector-icons/Ionicons'
+import { MenuButton } from './HamburgerMenu'
 import type { ColorScheme } from '../theme/colors'
 import { useDownloads } from '../store/DownloadsContext'
 import {
@@ -171,9 +172,11 @@ function HNCard({
 export default function HNScreen({
     colors,
     onItem,
+    onOpenMenu,
 }: {
     colors: ColorScheme
     onItem: (item: HNItem) => void
+    onOpenMenu?: () => void
 }) {
     const [feed, setFeed] = useState<HNFeed>('top')
     const [dateFilter, setDateFilter] = useState<DateFilter>('all')
@@ -242,6 +245,7 @@ export default function HNScreen({
                     >
                         <Ionicons name="refresh" size={15} color={colors.muted} />
                     </Pressable>
+                    {onOpenMenu && <MenuButton onPress={onOpenMenu} colors={colors} />}
                 </View>
             </View>
 

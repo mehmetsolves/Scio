@@ -7,6 +7,7 @@ import * as SecureStore from 'expo-secure-store'
 export type SourceName = 'arxiv' | 'semanticscholar' | 'openalex'
 export type Engine = 'anthropic' | 'openai' | 'mymemory' | 'groq' | 'gemini'
 export type TranslationStyle = 'academic' | 'simple'
+export type CategoryId = 'discover' | 'evrimagaci' | 'hn' | 'news'
 
 interface SettingsState {
     sources: SourceName[]
@@ -16,6 +17,7 @@ interface SettingsState {
     apiKey: string
     selectedTopics: string[]
     hasCompletedOnboarding: boolean
+    hiddenTabs: CategoryId[] // Ayarlar'dan kapatılan alt bar sekmeleri
     ready: boolean // true once persisted values are loaded
 }
 
@@ -27,6 +29,7 @@ interface SettingsActions {
     setApiKey: (k: string) => void
     setSelectedTopics: (topics: string[]) => void
     completeOnboarding: () => void
+    toggleTab: (t: CategoryId) => void
 }
 
 type SettingsContextValue = SettingsState & SettingsActions
@@ -89,6 +92,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     const [apiKey, setApiKeyState] = useState('')
     const [selectedTopics, setSelectedTopicsState] = useState<string[]>([])
     const [hasCompletedOnboarding, setHasCompletedOnboardingState] = useState(false)
+    const [hiddenTabs, setHiddenTabs] = useState<CategoryId[]>([])
     const [ready, setReady] = useState(false)
 
     // ── Load persisted values on mount ──
@@ -105,6 +109,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
                     if (parsed.style) setStyleState(parsed.style)
                     if (Array.isArray(parsed.selectedTopics)) setSelectedTopicsState(parsed.selectedTopics)
                     if (typeof parsed.hasCompletedOnboarding === 'boolean') setHasCompletedOnboardingState(parsed.hasCompletedOnboarding)
+                    if (Array.isArray(parsed.hiddenTabs)) setHiddenTabs(parsed.hiddenTabs)
                 }
                 const storedKey = await SecureStore.getItemAsync(SECURE_KEY)
                 if (storedKey) setApiKeyState(storedKey)
@@ -181,6 +186,21 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         persist({ hasCompletedOnboarding: true })
     }
 
+    // Sekmeyi aç/kapa. Keşfet sabittir — uygulamanın açılış ekranı olduğu için
+    // kapatılamaz; tüm sekmelerin kapanması kullanıcıyı içeriksiz bırakırdı.
+    const toggleTab = (t: CategoryId) => {
+        if (t === 'discover') return
+        setHiddenTabs((prev) => {
+            const hidden = prev.includes(t)
+            const next = hidden ? prev.filter((x) => x !== t) : [...prev, t]
+            // Son görünür sekmeyi kapatmaya izin verme
+            const visibleCount = 4 - next.length
+            if (visibleCount < 1) return prev
+            persist({ hiddenTabs: next })
+            return next
+        })
+    }
+
     return (
         <SettingsContext.Provider
             value={{
@@ -191,6 +211,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
                 apiKey,
                 selectedTopics,
                 hasCompletedOnboarding,
+                hiddenTabs,
                 ready,
                 toggleSource,
                 setDarkMode,
@@ -199,6 +220,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
                 setApiKey,
                 setSelectedTopics,
                 completeOnboarding,
+                toggleTab,
             }}
         >
             {children}

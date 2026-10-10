@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import {
     View,
     Text,
@@ -34,7 +34,7 @@ import { lightColors, darkColors, SOURCE_META, type ColorScheme } from './src/th
 import { searchArticles, translateText, summarizeText, type Article } from './src/api/client'
 import { fetchStoryIds, fetchItems, extractDomain, timeAgo, type HNItem } from './src/api/hn'
 import { fetchEvrimAgaciArticles, searchEvrimAgaci, formatEvrimDate, type EvrimAgaciArticle } from './src/api/evrimagaci'
-import { fetchAllNews, filterNews, formatNewsDate, getNewsSourceMeta, type NewsArticle } from './src/api/news'
+import { fetchAllNews, filterNews, formatNewsDate, getNewsSourceMeta, FALLBACK_SOURCE_META, type NewsArticle } from './src/api/news'
 import SettingsScreen from './src/screens/SettingsScreen'
 import SavedScreen from './src/screens/SavedScreen'
 import ProfileScreen from './src/screens/ProfileScreen'
@@ -46,11 +46,23 @@ import ArticleWebViewScreen from './src/screens/ArticleWebViewScreen'
 import OnboardingScreen from './src/screens/OnboardingScreen'
 import OfflineReaderScreen from './src/screens/OfflineReaderScreen'
 import { DownloadsProvider, useDownloads, type DownloadedArticle } from './src/store/DownloadsContext'
+import { CustomSourcesProvider } from './src/store/CustomSourcesContext'
+import DiscoverScreen from './src/screens/DiscoverScreen'
+import HamburgerMenu from './src/screens/HamburgerMenu'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-type Screen = 'results' | 'detail' | 'settings' | 'saved' | 'profile' | 'hn' | 'hnReader' | 'webview' | 'evrimagaci' | 'news' | 'offlineReader'
+type Screen = 'discover' | 'results' | 'detail' | 'settings' | 'saved' | 'profile' | 'hn' | 'hnReader' | 'webview' | 'evrimagaci' | 'news' | 'offlineReader'
 type Lang = 'tr' | 'en'
+
+// Alt bardaki dört sabit sekme. Kayıtlılar, Ayarlar ve Profil artık sekme
+// değil — hamburger menüden açılıyor (bkz. HamburgerMenu).
+type TabId = 'discover' | 'evrimagaci' | 'hn' | 'news'
+
+const TAB_SCREENS: TabId[] = ['discover', 'evrimagaci', 'hn', 'news']
+
+// Geri tuşunun uygulamadan çıkmasına izin verilen tek ekran: açılış ekranı.
+const HOME_SCREEN: Screen = 'discover'
 
 // ─── Font constants ──────────────────────────────────────────────────────────
 
@@ -282,6 +294,8 @@ function ResultsScreen({
                             </Text>
                             {newsResults.map((news) => {
                                 const srcMeta = getNewsSourceMeta(news.source)
+                                const badgeColor = srcMeta?.color ?? FALLBACK_SOURCE_META.color
+                                const badgeBg = srcMeta?.bg ?? FALLBACK_SOURCE_META.bg
                                 return (
                                     <Pressable
                                         key={news.id}
@@ -289,8 +303,8 @@ function ResultsScreen({
                                         style={[styles.card, { padding: 14, backgroundColor: colors.card, borderColor: colors.border }]}
                                     >
                                         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                                            <View style={[styles.badge, { backgroundColor: srcMeta.bg }]}>
-                                                <Text style={[styles.badgeText, { color: srcMeta.color }]}>{srcMeta.label}</Text>
+                                            <View style={[styles.badge, { backgroundColor: badgeBg }]}>
+                                                <Text style={[styles.badgeText, { color: badgeColor }]}>{srcMeta?.label ?? news.source}</Text>
                                             </View>
                                             <Text style={[styles.metaText, { color: colors.mutedLight }]}>{formatNewsDate(news.pubDate)}</Text>
                                         </View>
@@ -646,33 +660,38 @@ function DetailScreen({
 
 // ─── Bottom Tab Bar ──────────────────────────────────────────────────────────
 
-type TabId = 'news' | 'hn' | 'evrimagaci' | 'saved'
-
 function TabBar({
     active,
     onTab,
+    visibleTabs,
     colors,
 }: {
     active: TabId
     onTab: (tab: TabId) => void
+    visibleTabs: TabId[]
     colors: ColorScheme
 }) {
     const HN_ORANGE = '#E65100'
     const NEWS_RED = '#C62828'
     const EA_GREEN = '#2D8C3E'
 
-    const tabs: {
+    const allTabs: {
         id: TabId
         icon: keyof typeof Ionicons.glyphMap
         activeIcon: keyof typeof Ionicons.glyphMap
         label: string
         color?: string
     }[] = [
-        { id: 'news', icon: 'newspaper-outline', activeIcon: 'newspaper', label: 'Gündem', color: NEWS_RED },
-        { id: 'hn', icon: 'logo-hackernews', activeIcon: 'logo-hackernews', label: 'HN', color: HN_ORANGE },
+        { id: 'discover', icon: 'library-outline', activeIcon: 'library', label: 'Keşfet', color: colors.burgundy },
         { id: 'evrimagaci', icon: 'telescope-outline', activeIcon: 'telescope', label: 'Bilim', color: EA_GREEN },
-        { id: 'saved', icon: 'bookmark-outline', activeIcon: 'bookmark', label: 'Kayıtlı' },
+        { id: 'hn', icon: 'logo-hackernews', activeIcon: 'logo-hackernews', label: 'Teknoloji', color: HN_ORANGE },
+        { id: 'news', icon: 'newspaper-outline', activeIcon: 'newspaper', label: 'Gündem', color: NEWS_RED },
     ]
+
+    // Ayarlar'dan kapatılan kategorileri gizle. Keşfet sabit olduğu için her
+    // zaman en az bir sekme görünür.
+    const allVisible = visibleTabs.length === 0
+    const tabs = allVisible ? allTabs : allTabs.filter((t) => visibleTabs.includes(t.id))
 
     return (
         <View style={[styles.tabBar, { borderTopColor: colors.border, backgroundColor: colors.cream }]}>
@@ -725,33 +744,48 @@ function AppInner() {
         Inter_600SemiBold,
     })
 
-    const { darkMode, ready, hasCompletedOnboarding, setSelectedTopics, completeOnboarding } = useSettings()
+    const { darkMode, ready, hasCompletedOnboarding, setSelectedTopics, completeOnboarding, hiddenTabs } = useSettings()
     const colors = darkMode ? darkColors : lightColors
 
-    const [screen, setScreen] = useState<Screen>('news')
+    const [screen, setScreen] = useState<Screen>(HOME_SCREEN)
     const [query, setQuery] = useState('')
     const [article, setArticle] = useState<Article | null>(null)
     const [hnItem, setHnItem] = useState<HNItem | null>(null)
     const [webviewUrl, setWebviewUrl] = useState('')
     const [webviewTitle, setWebviewTitle] = useState('')
-    const [prevTab, setPrevTab] = useState<TabId>('news')
-    const [downloadedArticle, setDownloadedArticle] = useState<DownloadedArticle | null>(null)
 
-    const [prevScreen, setPrevScreen] = useState<Screen>('news')
+    // Makale/okucyucu ekranlarının geldiği sekme. Kayıtlılar'dan açılan bir
+    // makale kayıtlılara, Keşfet'ten açılan makale keşfete dönmeli. Eski
+    // prevTab/`prevTab === 'saved'` ifadesi bu ikisini birbirine karıştırıyordu.
+    const [detailOrigin, setDetailOrigin] = useState<Screen>('results')
+
+    // Arama sonuçlarının hangi sekmeden açıldığı — geri dönüş oraya yapılır.
+    const [searchOrigin, setSearchOrigin] = useState<Screen>('discover')
+
+    // Hamburger menünün açıldığı ekran — geri dönüş buraya yapılır.
+    const [menuOrigin, setMenuOrigin] = useState<Screen>(HOME_SCREEN)
+    const [menuOpen, setMenuOpen] = useState(false)
+
+    const [downloadedArticle, setDownloadedArticle] = useState<DownloadedArticle | null>(null)
+    const [prevScreen, setPrevScreen] = useState<Screen>(HOME_SCREEN)
 
     const handleBack = useCallback(() => {
-        if (screen === 'detail') setScreen(prevTab === 'saved' ? 'saved' : 'results')
-        else if (screen === 'results') setScreen('news')
+        if (screen === 'webview') setScreen(prevScreen)
+        else if (screen === 'detail') setScreen(detailOrigin)
+        else if (screen === 'settings' || screen === 'saved' || screen === 'profile') setScreen(menuOrigin)
         else if (screen === 'hnReader') setScreen('hn')
-        else if (screen === 'webview') setScreen(prevScreen)
-        else if (screen === 'offlineReader') setScreen('saved')
-        else if (screen === 'settings') setScreen(prevTab)
-        else setScreen('news')
-    }, [screen, prevTab, prevScreen])
+        else if (screen === 'results') setScreen(searchOrigin)
+        else setScreen(HOME_SCREEN)
+    }, [screen, detailOrigin, menuOrigin, prevScreen])
 
     useEffect(() => {
         const onBackPress = () => {
-            if (screen === 'news') {
+            // Menü açıkken geri tuşu önce menüyü kapatsın, ekran değiştirmesin
+            if (menuOpen) {
+                setMenuOpen(false)
+                return true
+            }
+            if (screen === HOME_SCREEN) {
                 return false // Allow Android to exit app
             }
             handleBack()
@@ -759,18 +793,25 @@ function AppInner() {
         }
         const sub = BackHandler.addEventListener('hardwareBackPress', onBackPress)
         return () => sub.remove()
-    }, [screen, handleBack])
+    }, [screen, handleBack, menuOpen])
 
     if (!fontsLoaded || !ready) return null
 
-    const handleSearch = (q: string) => {
+    const handleSearch = (q: string, origin: Screen = screen) => {
         setQuery(q)
+        setSearchOrigin(origin)
         setScreen('results')
     }
 
     const handleArticle = (a: Article) => {
         setArticle(a)
+        setDetailOrigin(screen === 'saved' ? 'saved' : 'results')
         setScreen('detail')
+    }
+
+    const openMenu = () => {
+        setMenuOrigin(screen)
+        setMenuOpen(true)
     }
 
     const handleHNItem = (item: HNItem) => {
@@ -791,11 +832,22 @@ function AppInner() {
     }
 
     const handleTab = (tab: TabId) => {
-        setPrevTab(tab)
         setScreen(tab)
     }
 
-    const showTab = screen === 'news' || screen === 'hn' || screen === 'evrimagaci' || screen === 'saved'
+    // Hamburger menü öğeleri: Kayıtlılar, Ayarlar, Profil. Hepsi menünün
+    // açıldığı ekrana döner (menuOrigin), sekme olmadıkları için alt barda
+    // görünmezler.
+    const openFromMenu = (target: Screen) => {
+        setMenuOpen(false)
+        setScreen(target)
+    }
+
+    // TypeScript `includes` ile değeri daraltmıyor, bu yüzden `screen` her
+    // zaman `Screen` kalıyor. `showTab` doğruysa `screen` gerçekten bir sekme
+    // olduğundan burada daraltma güvenli.
+    const showTab = (TAB_SCREENS as readonly Screen[]).includes(screen)
+    const activeTab: TabId = showTab ? (screen as TabId) : 'discover'
 
     if (!hasCompletedOnboarding) {
         return (
@@ -809,11 +861,14 @@ function AppInner() {
         )
     }
 
-    const activeTab: TabId =
-        screen === 'hn' ? 'hn'
-        : screen === 'evrimagaci' ? 'evrimagaci'
-        : screen === 'saved' ? 'saved'
-        : 'news'
+    // Sekme ekranlarının her biri menü düğmesini kendi başlığına alıyor.
+    const openMenuFromTab = () => openMenu()
+
+    // Ayarlardan kapatılmayan kategoriler. Boşsa tüm sekmeler gösterilir.
+    const visibleTabs: TabId[] = useMemo(
+        () => TAB_SCREENS.filter((t) => hiddenTabs.includes(t) === false),
+        [hiddenTabs],
+    )
 
     return (
         <SafeAreaProvider>
@@ -825,18 +880,27 @@ function AppInner() {
                 {screen === 'detail' && article && (
                     <DetailScreen article={article} onBack={handleBack} onOpenUrl={handleOpenUrl} colors={colors} />
                 )}
-                {screen === 'hn' && <HNScreen colors={colors} onItem={handleHNItem} />}
+                {screen === 'discover' && (
+                    <DiscoverScreen
+                        colors={colors}
+                        onArticle={handleArticle}
+                        onOpenSettings={() => { setScreen('settings') }}
+                        onOpenMenu={openMenuFromTab}
+                    />
+                )}
+                {screen === 'hn' && <HNScreen colors={colors} onItem={handleHNItem} onOpenMenu={openMenuFromTab} />}
                 {screen === 'hnReader' && hnItem && (
                     <HNReaderScreen item={hnItem} onBack={handleBack} colors={colors} />
                 )}
-                {screen === 'evrimagaci' && <EvrimAgaciScreen colors={colors} onOpenUrl={handleOpenUrl} />}
+                {screen === 'evrimagaci' && (
+                    <EvrimAgaciScreen colors={colors} onOpenUrl={handleOpenUrl} onOpenMenu={openMenuFromTab} />
+                )}
                 {screen === 'news' && (
                     <NewsScreen
                         colors={colors}
                         onOpenUrl={handleOpenUrl}
                         onSearch={handleSearch}
-                        onOpenSettings={() => { setPrevTab('news'); setScreen('settings') }}
-                        onOpenProfile={() => { setPrevTab('news'); setScreen('profile') }}
+                        onOpenMenu={openMenuFromTab}
                     />
                 )}
                 {screen === 'webview' && webviewUrl && (
@@ -848,7 +912,14 @@ function AppInner() {
                 {screen === 'offlineReader' && downloadedArticle && (
                     <OfflineReaderScreen article={downloadedArticle} onBack={handleBack} colors={colors} />
                 )}
-                {showTab && <TabBar active={activeTab} onTab={handleTab} colors={colors} />}
+                {showTab && <TabBar active={activeTab} onTab={handleTab} visibleTabs={visibleTabs} colors={colors} />}
+
+                <HamburgerMenu
+                    colors={colors}
+                    open={menuOpen}
+                    onClose={() => setMenuOpen(false)}
+                    onSelect={openFromMenu}
+                />
             </SafeAreaView>
         </SafeAreaProvider>
     )
@@ -859,11 +930,13 @@ function AppInner() {
 export default function App() {
     return (
         <SettingsProvider>
-            <SavedArticlesProvider>
-                <DownloadsProvider>
-                    <AppInner />
-                </DownloadsProvider>
-            </SavedArticlesProvider>
+            <CustomSourcesProvider>
+                <SavedArticlesProvider>
+                    <DownloadsProvider>
+                        <AppInner />
+                    </DownloadsProvider>
+                </SavedArticlesProvider>
+            </CustomSourcesProvider>
         </SettingsProvider>
     )
 }

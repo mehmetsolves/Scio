@@ -18,7 +18,11 @@ export interface NewsArticle {
     imageUrl?: string
 }
 
-export type NewsSourceId = 'bbc' | 'ntv' | 'sozcu' | 'hurriyet'
+// Kullanıcının kendi RSS/Atom kaynağını ekleyebilmesi için `id` dinamik.
+// `string & {}` ile dört built-in literal korunur (otomatik tamamlama ve tip
+// güvenliği bozulmadan), aynı zamanda 'ozel-websitesi' gibi değerler de
+// kabul edilir.
+export type NewsSourceId = 'bbc' | 'ntv' | 'sozcu' | 'hurriyet' | (string & {})
 
 export interface NewsSource {
     id: NewsSourceId
@@ -36,6 +40,7 @@ export const NEWS_SOURCES: NewsSource[] = [
         color: '#BB1919',
         bg: '#FDE8E8',
         icon: '🔵',
+        // Sözcü gibi bazı sunucular User-Agent olmadan isteği 403 ile reddediyor.
         rssUrl: 'https://feeds.bbci.co.uk/turkce/rss.xml',
     },
     {
@@ -44,7 +49,8 @@ export const NEWS_SOURCES: NewsSource[] = [
         color: '#1A237E',
         bg: '#E8EAF6',
         icon: '🔴',
-        rssUrl: 'https://www.ntv.com.tr/gundem.rss',
+        // Atom formatında: <feed><entry>...</entry></feed>
+        rssUrl: 'https://www.ntv.com.tr/turkiye.rss',
     },
     {
         id: 'sozcu',
@@ -52,6 +58,7 @@ export const NEWS_SOURCES: NewsSource[] = [
         color: '#D84315',
         bg: '#FBE9E7',
         icon: '📰',
+        // User-Agent olmadan 403 dönüyor
         rssUrl: 'https://www.sozcu.com.tr/feeds-rss-category-gundem',
     },
     {
@@ -63,6 +70,19 @@ export const NEWS_SOURCES: NewsSource[] = [
         rssUrl: 'https://www.hurriyet.com.tr/rss/anasayfa',
     },
 ]
+
+// Kullanıcıya sunulan toplu kaynak listesi (varsayılanlar +)
+export const CUSTOM_SOURCE_COLOR = '#1A1A1A'
+
+// İstemci tarafından yapılan tüm fetch isteklerine eklenecek tarayıcı
+// User-Agent'ı. Çoğu haber sunucusu bu olmadan isteği engelliyor.
+export const FETCH_USER_AGENT =
+    'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36'
+
+export const FETCH_HEADERS = {
+    'User-Agent': FETCH_USER_AGENT,
+    Accept: 'application/rss+xml, application/xml, text/xml, */*',
+}
 
 // ── XML yardımcıları (evrimagaci.ts ile ortak) ──────────────────────────────
 import { extractTag, extractAttribute, stripHtml, makeStableId } from './rss'
@@ -92,59 +112,99 @@ function makeArticleId(sourceId: NewsSourceId, link: string): string {
     return makeStableId(`news-${sourceId}`, link)
 }
 
-// ── Parse RSS XML ───────────────────────────────────────────────────────────
+// Bir <item> veya <entry> bloğunu makale modeline çevirir. Hem RSS hem Atom
+// için tek gövde; yalnızca etiket adları farklı (pubDate/published,
+// description/summary, enclosure/media:content).
+function parseEntry(content: string, sourceId: NewsSourceId, isAtom: boolean): NewsArticle | null {
+    // Atom'da başlantı <link rel="alternate" href="URL"> yapısındadır; RSS'te
+    // metin içinde <link>URL</link> bulunur.
+    const link = isAtom ? extractAttribute(content, 'link', 'href') : extractTag(content, 'link')
+    const title = stripHtml(extractTag(content, 'title'))
+    const rawDesc = isAtom
+        ? extractTag(content, 'summary') || extractTag(content, 'content')
+        : extractTag(content, 'description')
+    const pubDate = extractTag(content, 'pubDate') || extractTag(content, 'published') || extractTag(content, 'updated')
+    const category = stripHtml(extractTag(content, 'category')) || undefined
 
+    // Try to extract image
+    let imageUrl = extractAttribute(content, 'media:content', 'url')
+    if (!imageUrl) imageUrl = extractAttribute(content, 'media:thumbnail', 'url')
+    if (!imageUrl) imageUrl = extractAttribute(content, 'enclosure', 'url')
+    if (!imageUrl) {
+        const imgMatch = rawDesc.match(/<img[^>]+src="([^"]*)"/)
+        if (imgMatch) imageUrl = imgMatch[1]
+    }
+
+    if (!title || !link) return null
+    return {
+        id: makeArticleId(sourceId, link),
+        title,
+        description: stripHtml(rawDesc).substring(0, 300),
+        link,
+        pubDate: toISODate(pubDate),
+        source: sourceId,
+        category,
+        imageUrl,
+    }
+}
+
+// ── Parse RSS / Atom feed ────────────────────────────────────────────────────
+
+// Hem RSS (<rss><item>) hem Atom (<feed><entry>) desteklenir. NTV Atom kullanıyor
+// ve RSS'teki gibi <item> etiketi aramayı göçürürdü.
 function parseNewsRSS(xml: string, sourceId: NewsSourceId): NewsArticle[] {
     const articles: NewsArticle[] = []
 
-    const items = xml.split('<item>')
-    for (let i = 1; i < items.length; i++) {
-        const itemXml = items[i]
-        const closeIdx = itemXml.indexOf('</item>')
-        const content = closeIdx >= 0 ? itemXml.substring(0, closeIdx) : itemXml
+    const [openTag, closeTag, isAtom] = xml.includes('<entry')
+        ? ['<entry>', '</entry>', true]
+        : ['<item>', '</item>', false]
 
-        const title = stripHtml(extractTag(content, 'title'))
-        const link = extractTag(content, 'link')
-        const rawDesc = extractTag(content, 'description')
-        const description = stripHtml(rawDesc).substring(0, 300)
-        const pubDate = extractTag(content, 'pubDate')
-        const category = extractTag(content, 'category') || undefined
-
-        // Try to extract image
-        let imageUrl = extractAttribute(content, 'media:content', 'url')
-        if (!imageUrl) {
-            imageUrl = extractAttribute(content, 'media:thumbnail', 'url')
-        }
-        if (!imageUrl) {
-            imageUrl = extractAttribute(content, 'enclosure', 'url')
-        }
-        if (!imageUrl) {
-            const imgMatch = rawDesc.match(/<img[^>]+src="([^"]*)"/)
-            if (imgMatch) imageUrl = imgMatch[1]
-        }
-
-        if (title && link) {
-            articles.push({
-                id: makeArticleId(sourceId, link),
-                title,
-                description,
-                link,
-                pubDate: toISODate(pubDate),
-                source: sourceId,
-                category,
-                imageUrl,
-            })
-        }
+    const blocks = xml.split(openTag)
+    for (let i = 1; i < blocks.length; i++) {
+        const closeIdx = blocks[i].indexOf(closeTag)
+        const content = closeIdx >= 0 ? blocks[i].substring(0, closeIdx) : blocks[i]
+        const entry = parseEntry(content, sourceId, isAtom)
+        if (entry) articles.push(entry)
     }
 
     return articles
 }
 
+// Kullanıcının girdiği adresin gerçekten RSS/Atom beslediği olup olmadığını
+// kaydetmeden önce doğrular. HTTP 200 değil de bozuk bir HTML sayfası
+// döndüren adresleri reddetmek için içeriğe de bakılıyor.
+export async function validateRssUrl(url: string): Promise<{ ok: true } | { ok: false; error: string }> {
+    const normalized = normalizeFeedUrl(url)
+    try {
+        const res = await fetch(normalized, { headers: FETCH_HEADERS })
+        const body = await res.text()
+        if (!res.ok) return { ok: false, error: `Sunucu yanıt vermedi (HTTP ${res.status})` }
+        if (!body.includes('<item') && !body.includes('<entry')) {
+            return { ok: false, error: 'Bu adres bir RSS veya Atom kaynağı değil' }
+        }
+        return { ok: true }
+    } catch (err: any) {
+        return { ok: false, error: err?.message || 'Adrese ulaşılamadı' }
+    }
+}
+
+// Kullanıcı girdisini güvenli bir feed adresine çevirir: boşlukları atar,
+// HTTP'yi HTTPS yapar.
+export function normalizeFeedUrl(url: string): string {
+    const trimmed = url.trim()
+    return trimmed.replace(/^http:\/\//i, 'https://')
+}
+
 // ── Fetch from a single source ──────────────────────────────────────────────
 
-export async function fetchNewsFromSource(source: NewsSource): Promise<NewsArticle[]> {
+export async function fetchNewsFromSource(
+    source: NewsSource,
+    opts: { signal?: AbortSignal } = {},
+): Promise<NewsArticle[]> {
     try {
-        const res = await fetch(source.rssUrl)
+        // UA olmadan bazı sunucular 403 dönder (Sözcü, çoğu yerel site).
+        // İçerik türü RSS veya Atom olarak doğrulanmadan işlem dener.
+        const res = await fetch(source.rssUrl, { headers: FETCH_HEADERS, signal: opts.signal })
         if (!res.ok) {
             console.warn(`${source.label} RSS failed: HTTP ${res.status}`)
             return []
@@ -152,6 +212,7 @@ export async function fetchNewsFromSource(source: NewsSource): Promise<NewsArtic
         const xml = await res.text()
         return parseNewsRSS(xml, source.id)
     } catch (err: any) {
+        if (err?.name === 'AbortError') throw err
         console.warn(`${source.label} RSS error:`, err.message)
         return []
     }
@@ -159,12 +220,16 @@ export async function fetchNewsFromSource(source: NewsSource): Promise<NewsArtic
 
 // ── Fetch from all sources ──────────────────────────────────────────────────
 
-export async function fetchAllNews(sourceIds?: NewsSourceId[]): Promise<NewsArticle[]> {
-    const sources = sourceIds
-        ? NEWS_SOURCES.filter(s => sourceIds.includes(s.id))
-        : NEWS_SOURCES
+export async function fetchAllNews(
+    sourceIds?: NewsSourceId[],
+    opts: { sources?: NewsSource[]; signal?: AbortSignal } = {},
+): Promise<NewsArticle[]> {
+    const base = opts.sources ?? NEWS_SOURCES
+    const sources = sourceIds ? base.filter(s => sourceIds.includes(s.id)) : base
 
-    const results = await Promise.allSettled(sources.map(fetchNewsFromSource))
+    const results = await Promise.allSettled(
+        sources.map(s => fetchNewsFromSource(s, { signal: opts.signal })),
+    )
 
     const allArticles: NewsArticle[] = []
     for (const result of results) {
@@ -215,6 +280,17 @@ export function formatNewsDate(isoDate: string): string {
 
 // ── Get source meta by id ───────────────────────────────────────────────────
 
-export function getNewsSourceMeta(sourceId: NewsSourceId): NewsSource {
-    return NEWS_SOURCES.find(s => s.id === sourceId) || NEWS_SOURCES[0]
+// NOT: Bilinmeyen bir kaynak kimliği için artık sessizce BBC'ye düşmüyor.
+// Özel kaynak eklendiğinde kullanıcı, eklediği siteye ait bilinmeyen bir
+// kimlik için yanlışlıkla "BBC Türkçe" rozeti görmesin diye `undefined`
+// döndürülüyor; çağıran taraf `FALLBACK_SOURCE_META` ile nötr bir görünüm
+// sağlamalı.
+export const FALLBACK_SOURCE_META = {
+    color: '#6B6560',
+    bg: '#F5F0EA',
+}
+
+export function getNewsSourceMeta(sourceId: NewsSourceId, sources?: NewsSource[]): NewsSource | undefined {
+    const pool = sources ?? NEWS_SOURCES
+    return pool.find(s => s.id === sourceId)
 }

@@ -10,6 +10,7 @@ import {
     Alert,
 } from 'react-native'
 import Ionicons from '@expo/vector-icons/Ionicons'
+import { MenuButton } from './HamburgerMenu'
 import { useSavedArticles } from '../store/SavedArticlesContext'
 import { useDownloads } from '../store/DownloadsContext'
 import { fetchEvrimAgaciArticles, formatEvrimDate, type EvrimAgaciArticle } from '../api/evrimagaci'
@@ -27,9 +28,11 @@ const EA_GREEN_DARK = '#1B6B2A'
 export default function EvrimAgaciScreen({
     colors,
     onOpenUrl,
+    onOpenMenu,
 }: {
     colors: ColorScheme
     onOpenUrl: (url: string, title: string) => void
+    onOpenMenu?: () => void
 }) {
     const { isEvrimSaved, toggleEvrimSave } = useSavedArticles()
     const { downloadArticle, isDownloaded } = useDownloads()
@@ -77,6 +80,7 @@ export default function EvrimAgaciScreen({
                     >
                         <Ionicons name="refresh" size={15} color={colors.muted} />
                     </Pressable>
+                    {onOpenMenu && <MenuButton onPress={onOpenMenu} colors={colors} />}
                 </View>
             </View>
 
