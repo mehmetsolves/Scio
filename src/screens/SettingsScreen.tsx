@@ -58,7 +58,15 @@ const CATEGORY_LABELS: Record<CategoryId, string> = {
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
-export default function SettingsScreen({ colors, onBack }: { colors: ColorScheme; onBack?: () => void }) {
+export default function SettingsScreen({
+    colors,
+    onBack,
+    onOpenTopics,
+}: {
+    colors: ColorScheme
+    onBack?: () => void
+    onOpenTopics?: () => void
+}) {
     const {
         sources,
         darkMode,
@@ -66,6 +74,7 @@ export default function SettingsScreen({ colors, onBack }: { colors: ColorScheme
         style,
         apiKey,
         hiddenTabs,
+        selectedTopics,
         toggleSource,
         setDarkMode,
         setEngine,
@@ -131,6 +140,33 @@ export default function SettingsScreen({ colors, onBack }: { colors: ColorScheme
                             />
                         </View>
                     ))}
+                </View>
+
+                {/* ── İlgi Alanları ── */}
+                <View style={[s.sectionCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                    <Text style={[s.sectionTitle, { color: colors.burgundy }]}>İlgi Alanları</Text>
+                    <Text style={[s.sectionHint, { color: colors.muted }]}>
+                        Keşfet ekranında hangi konulardan makale görmek istediğini seç.
+                    </Text>
+                    <View style={[s.switchRow, { borderBottomColor: colors.border }]}>
+                        <Text style={[s.switchLabel, { color: colors.ink }]}>Seçili konular</Text>
+                        <Text style={[s.switchValue, { color: colors.muted }]} numberOfLines={1}>
+                            {selectedTopics.length > 0
+                                ? selectedTopics.length === 1
+                                    ? selectedTopics[0]
+                                    : `${selectedTopics[0]} +${selectedTopics.length - 1}`
+                                : 'Seçilmedi'}
+                        </Text>
+                    </View>
+                    <Pressable
+                        onPress={onOpenTopics}
+                        disabled={!onOpenTopics}
+                        accessibilityLabel="İlgi alanlarını düzenle"
+                        accessibilityRole="button"
+                        style={[s.addBtn, { backgroundColor: colors.burgundy }]}
+                    >
+                        <Text style={s.addBtnText}>Düzenle</Text>
+                    </Pressable>
                 </View>
 
                 {/* ── Kategoriler ── */}
@@ -438,6 +474,13 @@ const s = StyleSheet.create({
         lineHeight: 18,
         marginTop: -8,
         marginBottom: 12,
+    },
+    switchValue: {
+        fontFamily: SANS_MEDIUM,
+        fontSize: 13,
+        maxWidth: 160,
+        textAlign: 'right',
+        flexShrink: 1,
     },
     addBtn: {
         marginTop: 10,

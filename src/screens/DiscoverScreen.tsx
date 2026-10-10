@@ -72,12 +72,12 @@ const TTL = 5 * 60 * 1000
 export default function DiscoverScreen({
     colors,
     onArticle,
-    onOpenSettings,
+    onOpenTopics,
     onOpenMenu,
 }: {
     colors: ColorScheme
     onArticle: (a: Article) => void
-    onOpenSettings: () => void
+    onOpenTopics: () => void
     onOpenMenu?: () => void
 }) {
     const { selectedTopics, sources } = useSettings()
@@ -139,7 +139,7 @@ export default function DiscoverScreen({
                         Ayarlar'dan konu seçtiğinde sana özel makale akışı oluşur.
                     </Text>
                     <Pressable
-                        onPress={onOpenSettings}
+                        onPress={onOpenTopics}
                         accessibilityLabel="İlgi alanı seç"
                         accessibilityRole="button"
                         style={[s.emptyBtn, { backgroundColor: colors.burgundy }]}

@@ -49,10 +49,11 @@ import { DownloadsProvider, useDownloads, type DownloadedArticle } from './src/s
 import { CustomSourcesProvider, useCustomSources } from './src/store/CustomSourcesContext'
 import DiscoverScreen from './src/screens/DiscoverScreen'
 import HamburgerMenu from './src/screens/HamburgerMenu'
+import TopicsScreen from './src/screens/TopicsScreen'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-type Screen = 'discover' | 'results' | 'detail' | 'settings' | 'saved' | 'profile' | 'hn' | 'hnReader' | 'webview' | 'evrimagaci' | 'news' | 'offlineReader'
+type Screen = 'discover' | 'results' | 'detail' | 'settings' | 'saved' | 'profile' | 'hn' | 'hnReader' | 'webview' | 'evrimagaci' | 'news' | 'offlineReader' | 'topics'
 type Lang = 'tr' | 'en'
 
 // Alt bardaki dört sabit sekme. Kayıtlılar, Ayarlar ve Profil artık sekme
@@ -811,6 +812,7 @@ function AppInner() {
         if (screen === 'webview') setScreen(prevScreen)
         else if (screen === 'detail') setScreen(detailOrigin)
         else if (screen === 'settings' || screen === 'saved' || screen === 'profile') setScreen(menuOrigin)
+        else if (screen === 'topics') setScreen('settings')
         else if (screen === 'hnReader') setScreen('hn')
         else if (screen === 'results') setScreen(searchOrigin)
         else setScreen(HOME_SCREEN)
@@ -935,7 +937,7 @@ function AppInner() {
                     <DiscoverScreen
                         colors={colors}
                         onArticle={handleArticle}
-                        onOpenSettings={() => { setScreen('settings') }}
+                        onOpenTopics={() => { setScreen('topics') }}
                         onOpenMenu={openMenuFromTab}
                     />
                 )}
@@ -957,7 +959,10 @@ function AppInner() {
                 {screen === 'webview' && webviewUrl && (
                     <ArticleWebViewScreen url={webviewUrl} title={webviewTitle} onBack={handleBack} colors={colors} />
                 )}
-                {screen === 'settings' && <SettingsScreen colors={colors} onBack={handleBack} />}
+                {screen === 'settings' && (
+                    <SettingsScreen colors={colors} onBack={handleBack} onOpenTopics={() => setScreen('topics')} />
+                )}
+                {screen === 'topics' && <TopicsScreen colors={colors} onBack={handleBack} />}
                 {screen === 'saved' && <SavedScreen colors={colors} onArticle={handleArticle} onHNItem={handleHNItem} onOpenUrl={handleOpenUrl} onOfflineArticle={handleOfflineReader} />}
                 {screen === 'profile' && <ProfileScreen colors={colors} onBack={handleBack} />}
                 {screen === 'offlineReader' && downloadedArticle && (
