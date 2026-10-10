@@ -62,8 +62,12 @@ export default function HamburgerMenu({
                     >
                         <Ionicons name={item.icon} size={18} color={colors.burgundy} />
                         <View style={s.itemText}>
-                            <Text style={[s.itemLabel, { color: colors.ink }]}>{item.label}</Text>
-                            <Text style={[s.itemSub, { color: colors.mutedLight }]}>{item.sub}</Text>
+                            <Text style={[s.itemLabel, { color: colors.ink }]} numberOfLines={1}>
+                                {item.label}
+                            </Text>
+                            <Text style={[s.itemSub, { color: colors.mutedLight }]} numberOfLines={1}>
+                                {item.sub}
+                            </Text>
                         </View>
                         <Ionicons name="chevron-forward" size={14} color={colors.mutedLight} />
                     </Pressable>
@@ -98,7 +102,11 @@ const s = StyleSheet.create({
     menu: {
         position: 'absolute',
         top: 56,
+        // Sola doğru büyüyor, sağ kenar sabit. `right` ile sabitlenince
+        // içerik taştığında ekranın SOLUNDAN dışarı çıkıyordu; genişlik
+        // üst sınırlanınca satırlar içeride kalıp alt satıra iniyor.
         right: 16,
+        maxWidth: 260,
         borderWidth: 1,
         borderRadius: 12,
         padding: 12,
@@ -127,6 +135,9 @@ const s = StyleSheet.create({
     itemText: {
         flex: 1,
         gap: 1,
+        // flex: 1 yeterli değil — ikon ve chevron sabit genişlikte olduğu
+        // için bu kutu taşmaya devam edebiliyor. Taşmayı engelle.
+        flexShrink: 1,
     },
     itemLabel: {
         fontFamily: SANS_SEMIBOLD,
@@ -135,6 +146,8 @@ const s = StyleSheet.create({
     itemSub: {
         fontFamily: SANS,
         fontSize: 11,
+        // Alt açıklama uzun adresleri/kelimeleri taşıyordu.
+        flexShrink: 1,
     },
     iconBtn: {
         width: 36,
