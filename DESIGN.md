@@ -1,12 +1,20 @@
-# WordReads — Mobil Uygulama Tasarım Briefi
+# Scio — Mobil Uygulama Tasarım Briefi
 
 > Bu doküman herhangi bir AI tasarım aracına (Galileo AI, Uizard, Figma AI, Midjourney, DALL-E, Vizcom, Musho, v0, Relume, veya benzeri) prompt olarak verilebilecek şekilde hazırlanmıştır. Her ekran bağımsız bir prompt olarak kopyalanıp yapıştırılabilir.
+>
+> **Not:** Bu brief bir *hedef* tarif eder, kodun kendisini değil. Koddan
+> bilinçli olarak ayrıldığı yerler: (1) kartlar `borderWidth: 1` kullanıyor,
+> shadow yok — flat/dergi estetiğiyle daha tutarlı bulundu; (2) tab bar 4 sekme
+> (Gündem, HN, Bilim, Kayıtlı), 6 değil — Ayarlar ve Profil, Gündem başlığındaki
+> ikon butonlardan açılıyor; (3) bento grid'li ayrı bir "Keşfet" ana sayfası
+> yok, uygulama doğrudan Gündem ile açılıyor. Bu üç madde için brief değil,
+> `ARCHITECTURE.md` ve kod esastır.
 
 ---
 
 ## Uygulama Hakkında (Bağlam)
 
-WordReads, akademik makaleleri, bilim haberlerini ve teknoloji içeriklerini Türkçe'ye çevirerek sunan bir mobil okuma uygulamasıdır. Hedef kitle: Türkçe konuşan öğrenciler, araştırmacılar ve bilim meraklıları. Platform: iOS ve Android (React Native).
+Scio, akademik makaleleri, bilim haberlerini ve teknoloji içeriklerini Türkçe'ye çevirerek sunan bir mobil okuma uygulamasıdır. Hedef kitle: Türkçe konuşan öğrenciler, araştırmacılar ve bilim meraklıları. Platform: iOS ve Android (React Native).
 
 ---
 
@@ -101,7 +109,7 @@ Bir mobil uygulama ana sayfası tasarla. iPhone boyutunda (390x844px), dikey, sc
 Arka plan: sıcak krem #FAF7F2.
 
 **Üst alan (scroll ile birlikte kaybolabilir):**
-- Sol üstte "WordReads" marka yazısı — serif italic, küçük (13pt), bordo (#7C1D2E), uppercase, letter-spacing geniş.
+- Sol üstte "Scio" marka yazısı — serif italic, küçük (13pt), bordo (#7C1D2E), uppercase, letter-spacing geniş.
 - Sağ üstte küçük daire profil ikonu (32px, gri placeholder).
 - Altında tam genişlikte arama çubuğu: beyaz arka plan, 1.5px sıcak gri border (#C8BFB5), köşe yuvarlatma 14px. Sol tarafta büyüteç ikonu, placeholder: "Ne okumak istersin?" — soluk gri. Etrafında çok hafif shadow.
 - Arama çubuğunun altında yatay kayan küçük pill butonlar: "transformers", "iklim değişikliği", "kuantum hesaplama", "nöroplastisite", "dil modeli". Şeffaf arka plan, ince border, yuvarlak köşeler (20px).
@@ -386,7 +394,7 @@ Prompt örneği: "Yukardaki [Ekran Adı] promptunu dark mode olarak tasarla. Ark
 
 Tüm ekranları tek seferde oluşturmak isteyen araçlar için (Galileo AI, Uizard gibi):
 
-> "WordReads adında bir mobil okuma uygulaması tasarla. Akademik makaleleri ve haberleri Türkçe'ye çeviren bir uygulama. 12 ekrandan oluşuyor: Onboarding (konu seçimi), Ana Sayfa (bento grid: haberler + HN + bilim + öneriler), Arama Sonuçları (gruplu liste), Makale Detayı (çevirilmiş abstract, özetleme, dil değiştirme FAB), Hacker News listesi, Evrim Ağacı bilim makaleleri, Gündem haberleri, Kaydedilenler, Ayarlar, Çevrimdışı Okuyucu, WebView, Loading/Hata durumları. Renk paleti: sıcak krem arka plan (#FAF7F2), bordo marka rengi (#7C1D2E), serif başlıklar, sans-serif UI. Modern tasarım: glassmorphism tab bar, bento grid layout, skeleton loading, bold tipografi, yuvarlatılmış köşeler (16px), hafif shadow kartlar. Hem light hem dark mode."
+> "Scio adında bir mobil okuma uygulaması tasarla. Akademik makaleleri ve haberleri Türkçe'ye çeviren bir uygulama. 12 ekrandan oluşuyor: Onboarding (konu seçimi), Ana Sayfa (bento grid: haberler + HN + bilim + öneriler), Arama Sonuçları (gruplu liste), Makale Detayı (çevirilmiş abstract, özetleme, dil değiştirme FAB), Hacker News listesi, Evrim Ağacı bilim makaleleri, Gündem haberleri, Kaydedilenler, Ayarlar, Çevrimdışı Okuyucu, WebView, Loading/Hata durumları. Renk paleti: sıcak krem arka plan (#FAF7F2), bordo marka rengi (#7C1D2E), serif başlıklar, sans-serif UI. Modern tasarım: glassmorphism tab bar, bento grid layout, skeleton loading, bold tipografi, yuvarlatılmış köşeler (16px), hafif shadow kartlar. Hem light hem dark mode."
 
 ---
 

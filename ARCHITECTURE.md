@@ -1,8 +1,12 @@
-# WordReads — Uygulama Mimarisi & Mantık Dokümantasyonu
+# Scio — Uygulama Mimarisi & Mantık Dokümantasyonu
 
 > **Son Güncelleme:** Ekim 2026  
 > **Platform:** React Native (Expo SDK 54)  
 > **Dil:** TypeScript  
+>
+> **Eski ad:** WordReads. Yeniden adlandırma sonrası depolama anahtarları
+> `@wordreads_*` → `@scio_*` oldu; mevcut kullanıcı verisi tek seferlik taşıma
+> ile korunuyor.
 
 ---
 
@@ -27,7 +31,7 @@
 
 ## 1. Genel Bakış
 
-**WordReads**, akademik makaleleri, bilim haberlerini, teknoloji içeriklerini ve güncel haberleri **Türkçe'ye çevirerek** kullanıcıya sunan bir mobil okuma uygulamasıdır.
+**Scio**, akademik makaleleri, bilim haberlerini, teknoloji içeriklerini ve güncel haberleri **Türkçe'ye çevirerek** kullanıcıya sunan bir mobil okuma uygulamasıdır.
 
 ### Temel Değer Önerisi
 - 🔬 **Akademik makaleler** → arXiv, Semantic Scholar, OpenAlex kaynaklarından arama
@@ -70,20 +74,20 @@ Türkçe konuşan, akademik veya bilimsel içerikleri ana dilinde takip etmek is
 ## 3. Dosya & Klasör Yapısı
 
 ```
-wordreads-expo/
-├── App.tsx                          # Ana giriş noktası (~1400 satır)
+scio/
+├── App.tsx                          # Ana giriş noktası (~1150 satır)
 │   ├── SourceBadge                  # Kaynak etiketi bileşeni
 │   ├── ArticleCard                  # Makale kart bileşeni
-│   ├── HomeScreen                   # Ana ekran (Screen 1)
-│   ├── ResultsScreen                # Arama sonuçları (Screen 2)
-│   ├── DetailScreen                 # Makale detayı (Screen 3)
-│   ├── TabBar                       # Alt navigasyon çubuğu
+│   ├── ResultsScreen                # Arama sonuçları
+│   ├── DetailScreen                 # Makale detayı
+│   ├── TabBar                       # Alt navigasyon çubuğu (4 sekme)
 │   ├── AppInner                     # Ana uygulama kabı
 │   └── App (default export)         # Root Provider sarmalayıcı
 │
 ├── src/
 │   ├── api/                         # API istemcileri
 │   │   ├── client.ts                # Ana backend API (arama, çeviri, özetleme)
+│   │   ├── rss.ts                   # RSS/XML ortak yardımcıları (parse + entity)
 │   │   ├── hn.ts                    # Hacker News Firebase API
 │   │   ├── evrimagaci.ts            # Evrim Ağacı RSS parser
 │   │   └── news.ts                  # Türk haber kaynakları RSS parser
@@ -148,38 +152,43 @@ wordreads-expo/
 │                       │        │                                    │
 │                    Hayır ──────┤────── Evet                         │
 │                       │        │        │                           │
-│              ┌────────▼──┐     │  ┌─────▼─────┐                     │
-│              │ Onboarding │    │  │ HomeScreen │                    │
+│              ┌────────▼──┐     │  ┌─────▼──────┐                    │
+│              │ Onboarding │    │  │ NewsScreen │                    │
 │              │  (Konu seç)│    │  │  + TabBar  │                    │
 │              └────────────┘    │  └────────────┘                    │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
+> **Önemli:** Uygulama açılışta doğrudan **Gündem** (`news`) ekranına gider.
+> Ayrı bir "Home / Keşfet" ekranı **yoktur** — `Screen` tipinde `'home'` değeri
+> bulunmaz. Aşağıdaki navigasyon grafiği gerçek kodu yansıtır.
+
 ### Navigasyon Akışı
 
 ```
-HomeScreen ──┬── [Arama] ──────────→ ResultsScreen ──→ DetailScreen
-             │                                          │
-             ├── [HN Kartı] ───────→ HNReaderScreen     │
-             │                                          │
-             ├── [Evrim Ağacı] ────→ WebViewScreen      │
-             │                                          │
-             ├── [Haber Kartı] ────→ WebViewScreen      │
-             │                                          │
-             └── [Öneri Kartı] ────→ DetailScreen       │
-                                                        │
-DetailScreen ──┬── [Orijinali Gör] → WebViewScreen      │
-               ├── [Kaydet ♥] ─────→ SavedArticles      │
-               ├── [İndir ⬇] ──────→ Downloads          │
-               ├── [Çevir 🇹🇷/🇬🇧] ─→ API Translate     │
-               └── [Özetle 📝] ────→ API Summarize      │
-                                                        │
-TabBar ────────┬── Keşfet (⊞) ─────→ HomeScreen         │
-               ├── Gündem (📰) ────→ NewsScreen          │
-               ├── HN (▲) ─────────→ HNScreen           │
-               ├── Bilim (🌿) ─────→ EvrimAgaciScreen   │
-               ├── Kayıtlı (♡) ───→ SavedScreen         │
-               └── Ayarlar (⚙) ───→ SettingsScreen      │
+NewsScreen (Gündem) ──┬── [Arama çubuğu] ──→ ResultsScreen ──→ DetailScreen
+   ▲                  │                                          │
+   │                  ├── [İlgi alanı çipi] → ResultsScreen       │
+   │                  │                                          │
+   │                  ├── [Profil ikonu] ──→ ProfileScreen        │
+   │                  │                                          │
+   │                  └── [Ayarlar ikonu] ─→ SettingsScreen       │
+   │                                                             │
+   │   DetailScreen ──┬── [Orijinali Gör] → ArticleWebViewScreen  │
+   │                  ├── [Kaydet 🔖] ────→ SavedArticles         │
+   │                  ├── [İndir ⬇] ──────→ Downloads             │
+   │                  ├── [Çevir 🇹🇷/🇬🇧] ──→ API Translate        │
+   │                  └── [Özetle 📝] ────→ API Summarize         │
+   │                                                             │
+   │   HNScreen ──────→ HNReaderScreen ──→ WebView / metin        │
+   │   EvrimAgaciScreen ──→ ArticleWebViewScreen                  │
+   │   NewsScreen kartı ──→ ArticleWebViewScreen                  │
+   │                                                             │
+   └── TabBar ──┬── Gündem (📰) ────→ NewsScreen                  │
+                ├── HN (▲) ─────────→ HNScreen                   │
+                ├── Bilim (🔭) ─────→ EvrimAgaciScreen           │
+                └── Kayıtlı (🔖) ───→ SavedScreen                 │
+                                     └── [Offline kart] → OfflineReaderScreen
 ```
 
 ---
@@ -199,41 +208,41 @@ TabBar ────────┬── Keşfet (⊞) ─────→ HomeSc
 ```
 Kullanıcı → Konu Seç → [Devam Et] → selectedTopics kaydedilir
                                     → hasCompletedOnboarding = true
-                                    → HomeScreen'e yönlendirilir
+                                    → Gündem (NewsScreen) açılır
 ```
+
+Seçilen konular bir daha **Gündem ekranında çip olarak** görünür ve tek
+dokunuşla o konuda arama başlatır (bkz. 5.8). Önceden toplanıp hiç
+kullanılmıyordu.
 
 ---
 
-### 5.2 HomeScreen — Ana Sayfa
+### 5.2 Gündem — Ana Ekran (NewsScreen)
 
-**Amaç:** Keşif merkezi; farklı kaynaklardan içeriklerin önizlemesi.
+**Amaç:** Uygulamanın açılış ekranı. Türk haber RSS akışı + arama girişi +
+ilgi alanı kısayolları.
 
 **Bölümler (Yukarıdan Aşağıya):**
 
 | Sıra | Bölüm | Kaynak | İçerik |
 |------|-------|--------|--------|
-| 1 | **Başlık & Arama** | - | Brand, h1, arama çubuğu, geçmiş aramaları (pill'ler) |
-| 2 | **Son Dakika — Gündem** | BBC, NTV, Sözcü, Hürriyet | RSS'ten çekilen 5 haber |
-| 3 | **Yeni Çıkanlar — HN** | Hacker News | Firebase API'den 5 story |
-| 4 | **Evrim Ağacı — Bilim** | evrimagaci.org | RSS'ten çekilen 4 makale |
-| 5 | **Sizin İçin Öneriler** | arXiv, SS, OA | `selectedTopics` bazlı akademik makaleler |
+| 1 | **Başlık + Profil/Ayarlar** | - | "Gündem" başlığı, iki ikon buton |
+| 2 | **Arama çubuğu** | - | Akademik arama başlatır (ResultsScreen) |
+| 3 | **İlgi alanı çipleri** | Onboarding | `selectedTopics` — varsa gösterilir, tek dokunuşla arar |
+| 4 | **Kaynak filtresi** | BBC, NTV, Sözcü, Hürriyet | Haber akışını kaynağa göre filtreler |
+| 5 | **Haber kartları** | 4 RSS | Kaynak renk şeridi + başlık + özet + indir butonu |
 
-**Veri Yükleme Sırası (Paralel):**
+**Veri Yükleme:**
 ```typescript
 useEffect(() => {
-    // 4 paralel fetch — biri bitmese diğerleri etkilenmez
-    fetchStoryIds('new') → setHnStories        // HN
-    searchArticles(topics) → setRecArticles     // Akademik öneriler
-    fetchEvrimAgaciArticles() → setEvrimArticles // Evrim Ağacı
-    fetchAllNews() → setNewsArticles            // Haberler
+    fetchAllNews() → setArticles   // 4 RSS paralel, Promise.allSettled
 }, [])
 ```
 
 **Arama Mekanizması:**
 1. Kullanıcı arama çubuğuna yazar → `query` state güncellenir
-2. Enter/Submit → `onSearch(query)` çağrılır
-3. Geçmiş arama pill'lerine tıklanırsa → direkt `onSearch(word)`
-4. `ResultsScreen`'e geçiş yapılır
+2. Enter/Submit → `onSearch(query)` → `ResultsScreen`'e geçiş
+3. İlgi alanı çipine tıklanırsa → direkt `onSearch(topic)`
 
 ---
 
@@ -448,7 +457,7 @@ interface SettingsState {
 ```
 
 **Persist Stratejisi:**
-- Genel ayarlar → `AsyncStorage` (`@wordreads_settings`)
+- Genel ayarlar → `AsyncStorage` (`@scio_settings`)
 - API anahtarı → `expo-secure-store` (şifrelenmiş depolama)
 - Her değişiklikte → mevcut değerler okunur, patch uygulanır, yazılır
 
@@ -501,9 +510,9 @@ downloadArticle(meta)
 
 **Depolama Stratejisi (Android AsyncStorage Limiti):**
 ```
-@wordreads_downloads_index    → ["id1", "id2", "id3"]     (hafif)
-@wordreads_download_id1       → { ...DownloadedArticle }   (ağır, ayrı)
-@wordreads_download_id2       → { ...DownloadedArticle }   (ağır, ayrı)
+@scio_downloads_index    → ["id1", "id2", "id3"]     (hafif)
+@scio_download_id1       → { ...DownloadedArticle }   (ağır, ayrı)
+@scio_download_id2       → { ...DownloadedArticle }   (ağır, ayrı)
 ```
 
 ---
@@ -552,15 +561,25 @@ POST /api/translate
 
 ### 7.3 RSS Parse (Evrim Ağacı + Haberler)
 
-**Harici bağımlılık yok** — Custom XML parser:
+**Harici bağımlılık yok** — `src/api/rss.ts` içindeki ortak yardımcılar:
 
 ```typescript
-// XML tag içeriği çıkarma
-function extractTag(xml: string, tag: string): string
-// CDATA wrapper'ı soyma
-// HTML entity decode
-// img src attribute çıkarma
+export function extractTag(xml, tag): string          // tag içeriği + CDATA soyma
+export function extractAttribute(xml, tag, attr)      // media:content url="..."
+export function stripHtml(html): string               // HTML temizle + entity çöz
+export function makeStableId(prefix, link): string    // djb2 hash → kararlı ID
 ```
+
+`evrimagaci.ts` ve `news.ts` bu modülü paylaşır. Önceden üç fonksiyonun
+birebir kopyası iki dosyada duruyordu; tek yerde toplandı.
+
+**Entity çözmede iki incelik:**
+- **Sıra:** isimli entity'ler (`&amp;`) sayısal olanlardan (`&#8217;`) **önce**
+  çözülür. Ters sırada isimli kurallar, sayısal kural çalıştıktan sonraki
+  metne uygulanır ve `&#038;` gibi çift-kodlanmış girdiler yanlış sonuç verir.
+- **`fromCodePoint`, `fromCharCode` değil:** `fromCharCode` kod noktasını
+  16 bite kestiği için `&#128512;` gibi astral düzlem karakterleri (emoji)
+  bozulur.
 
 **Neden harici parser kullanılmadı?**
 - React Native'de XML parser'lar sorunlu olabiliyor
@@ -576,11 +595,11 @@ function extractTag(xml: string, tag: string): string
 React Navigation kullanılmıyor. Navigasyon tamamen `screen` state'i ile yönetiliyor:
 
 ```typescript
-type Screen = 'home' | 'results' | 'detail' | 'settings' | 'saved' |
-              'profile' | 'hn' | 'hnReader' | 'webview' | 'evrimagaci' |
-              'news' | 'offlineReader'
+type Screen = 'results' | 'detail' | 'settings' | 'saved' | 'profile' |
+              'hn' | 'hnReader' | 'webview' | 'evrimagaci' | 'news' |
+              'offlineReader'
 
-const [screen, setScreen] = useState<Screen>('home')
+const [screen, setScreen] = useState<Screen>('news')   // açılış: Gündem
 ```
 
 ### Geri Butonu Mantığı
@@ -588,11 +607,12 @@ const [screen, setScreen] = useState<Screen>('home')
 ```typescript
 const handleBack = () => {
     if (screen === 'detail')        → 'results' veya 'saved' (prevTab'a göre)
-    if (screen === 'results')       → 'home'
+    if (screen === 'results')       → 'news'
     if (screen === 'hnReader')      → 'hn'
     if (screen === 'webview')       → prevScreen (dinamik)
     if (screen === 'offlineReader') → 'saved'
-    else                            → 'home'
+    if (screen === 'settings')      → prevTab
+    else                            → 'news'
 }
 ```
 
@@ -601,19 +621,24 @@ const handleBack = () => {
 ```typescript
 useEffect(() => {
     BackHandler.addEventListener('hardwareBackPress', () => {
-        if (screen === 'home') return false  // Uygulamadan çıkışa izin ver
+        if (screen === 'news') return false  // Uygulamadan çıkışa izin ver
         handleBack()
         return true                          // Çıkışı engelle
     })
 }, [screen])
 ```
 
-### Tab Bar Görünürlüğü
+### Tab Bar
 
-Tab bar yalnızca "tab" ekranlarında gösterilir:
+Dört sekme vardır ve tab bar yalnızca bu ekranlarda gösterilir:
+
 ```typescript
-const showTab = ['home', 'settings', 'saved', 'profile', 'hn', 'evrimagaci', 'news']
-    .includes(screen)
+type TabId = 'news' | 'hn' | 'evrimagaci' | 'saved'
+const showTab = ['news', 'hn', 'evrimagaci', 'saved'].includes(screen)
+```
+
+**Ayarlar ve Profil sekme değildir** — Gündem başlığındaki iki ikon butondan
+açılır (`onOpenSettings` / `onOpenProfile`).
 ```
 
 ---
@@ -656,7 +681,7 @@ const showTab = ['home', 'settings', 'saved', 'profile', 'hn', 'evrimagaci', 'ne
 ### Tam Kullanıcı Senaryosu: "Bir makale aramak ve okumak"
 
 ```
-1. Kullanıcı HomeScreen'de arama çubuğuna "yapay zeka" yazar
+1. Kullanıcı Gündem ekranında arama çubuğuna "yapay zeka" yazar
    │
 2. handleSubmit() → onSearch("yapay zeka")
    │
@@ -741,11 +766,28 @@ Uygulama açılır → SecureStore.getItemAsync(key) → state'e yükle
 Kullanıcı siler → SecureStore.deleteItemAsync(key)
 ```
 
+### Yeniden Adlandırma Taşıması (WordReads → Scio)
+
+Depolama anahtarları `@wordreads_*` → `@scio_*` ve secure-store anahtarı
+`wordreads_api_key` → `scio_api_key` olarak değişti. Mevcut kullanıcıların
+verisi kaybolmasın diye üç context'te tek seferlik, **idempotent** taşıma var:
+
+```
+SettingsContext.migrateLegacyKeys()      → @wordreads_settings, wordreads_api_key
+SavedArticlesContext.migrateRenamedKeys() → 3 kayıt anahtarı
+DownloadsContext.migrateDownloadedArticles() → index + entry başına anahtar
+```
+
+Kural her yerde aynı: eski anahtar varsa okunur, yeni anahtar boşsa oraya
+yazılır, artık silinir. İkinci açılışta eski anahtar bulunmaz → hiçbir şey
+yapılmaz. `DownloadsContext` entry başına bir anahtar kullandığı için index
+listeleyip her kaydı tek tek taşır.
+
 ---
 
 ## 13. Performans Stratejileri
 
-1. **Paralel veri çekme:** HomeScreen'de 4 kaynak aynı anda fetch edilir
+1. **Paralel veri çekme:** Gündem ve Arama ekranlarında kaynaklar aynı anda fetch edilir (`Promise.allSettled`)
 2. **Lazy loading:** Ekranlar yalnızca `screen === 'X'` olduğunda render olur
 3. **Çeviri cache:** Kaydedilen makalelerin çevirileri tekrar istenmez
 4. **Batch fetch:** HN story'leri tek tek değil, `Promise.allSettled()` ile toplu
@@ -770,6 +812,16 @@ Kullanıcı siler → SecureStore.deleteItemAsync(key)
 
 ## Notlar
 
-- Uygulama şu anda **single-file architecture** (`App.tsx` ~1400 satır) kullanıyor. Ekranlar `src/screens/`'e taşınmış durumda ama ana 3 ekran (Home, Results, Detail) hâlâ `App.tsx` içinde.
-- Backend Cloudflare Worker olarak deploy edilmiş. Kaynak kodu bu repo'da değil.
-- Font'lar ağdan yükleniyor (`@expo-google-fonts`). Tamamen offline ilk açılış için `assets/fonts/` altına taşınabilir.
+- `App.tsx` (~1150 satır) hâlâ iki ekran (Results, Detail) ve `TabBar`'ı
+  barındırıyor; geri kalan ekranlar `src/screens/` altında. Tümünü taşımak
+  mümkün ama şu an çalışan bir denge.
+- Backend Cloudflare Worker olarak deploy edilmiş. Kaynak kodu bu repo'da
+  değil. **Uygulama Scio adına geçti ama Worker hâlâ eski adresinde
+  (`wordreads-worker.yildirimmehmed21.workers.dev`);** Worker yeniden deploy
+  edilene kadar `src/api/client.ts` içindeki URL değiştirilmemeli, aksi halde
+  arama/çeviri/özetleme tamamen durur.
+- Font'lar ağdan yükleniyor (`@expo-google-fonts`). Tamamen offline ilk açılış
+  için `assets/fonts/` altına taşınıp `expo-font` ile yerelden yüklenebilir.
+- `DESIGN_STITCH_REFERENCE.ts` kod tarafından import **edilmiyor** — Stitch'e
+  girdi olarak hazırlanmış bir token referansı; çalışma zamanında kullanılmıyor.
+- Test altyapısı yok; tip güvenliği `npx tsc --noEmit` ile sağlanıyor.

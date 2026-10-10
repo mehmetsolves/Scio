@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// WordReads — Google Stitch Design Reference
+// Scio — Google Stitch Design Reference
 // ─────────────────────────────────────────────────────────────────────────────
 //
 // Bu dosya Google Stitch'e verilmek üzere sıfırdan yazılmış bir tasarım
@@ -373,7 +373,7 @@ export const screenStyles = StyleSheet.create({
         paddingBottom: 28,
         borderBottomWidth: 1,
     },
-    // Brand: "WORDREADS" — italic serif, uppercase, letter-spacing 2
+    // Brand: "SCIO" — italic serif, uppercase, letter-spacing 2
     homeBrand: {
         fontFamily: TYPOGRAPHY.families.serifItalic,
         fontSize: 13,
