@@ -1,0 +1,40 @@
+# Bağımlılıklar
+node_modules/
+
+# Expo / derleme çıktıları
+.expo/
+dist/
+build/
+.eas/
+web-build/
+
+# Derlenmiş uygulama paketleri (EAS Build üretir, repoda tutulmaz)
+apks/
+*.apk
+*.aab
+*.ipa
+
+# Sertifikalar ve imzalama anahtarları
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.keystore
+credentials.json
+
+# Günlükler ve geçici dosyalar
+npm-debug.*
+yarn-error.log
+*.orig.*
+.DS_Store
+Thumbs.db
+
+# Ortam değişkenleri (API anahtarı vb. — asla commit'lenmesin)
+.env
+.env.local
+.env.*.local
+
+# Editör
+.idea/
+.vscode/*.log

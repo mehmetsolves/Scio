@@ -1,0 +1,32 @@
+{
+  "expo": {
+    "name": "WordReads",
+    "slug": "wordreads",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "backgroundColor": "#FAF7F2"
+    },
+    "android": {
+      "package": "com.wordreads.app",
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#FAF7F2"
+      },
+      "permissions": ["INTERNET"]
+    },
+    "plugins": [
+      "expo-asset",
+      "expo-secure-store",
+      "./plugins/adi-registration"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "46886382-dd2a-4a8f-9342-ff0477f96333"
+      }
+    }
+  }
+}
