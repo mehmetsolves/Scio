@@ -72,7 +72,9 @@ export default function NewsScreen({
     const loadNews = () => {
         setLoading(true)
         setError(null)
-        fetchAllNews()
+        // Özel kaynaklar da akışa karışır — bağımlılık dizisine alınmaz çünkü
+        // sadece ilk yükleme ve yenileme tetikleniyorsa güncel listeden okunur.
+        fetchAllNews(undefined, { sources: allSources })
             .then(setArticles)
             .catch((err) => setError(err.message || 'Haberler yüklenemedi'))
             .finally(() => {
@@ -193,7 +195,7 @@ export default function NewsScreen({
                             Tümü
                         </Text>
                     </Pressable>
-                    {NEWS_SOURCES.map((src) => {
+                    {allSources.map((src) => {
                         const isActive = activeFilter === src.id
                         return (
                             <Pressable
