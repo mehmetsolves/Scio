@@ -1,9 +1,12 @@
-import { useState } from 'react'
-import { View, Text, Pressable, StyleSheet } from 'react-native'
+import { useRef, useState } from 'react'
+import { View, Text, Pressable, StyleSheet, ActivityIndicator, Alert } from 'react-native'
 import Ionicons from '@expo/vector-icons/Ionicons'
-import { WebView } from 'react-native-webview'
+import { WebView, type WebViewMessageEvent } from 'react-native-webview'
 import type { ColorScheme } from '../theme/colors'
 import { useSettings } from '../store/SettingsContext'
+import { useDownloads } from '../store/DownloadsContext'
+import { CAPTURE_DOM_SCRIPT } from '../api/pageSnapshot'
+import { makeStableId } from '../api/rss'
 import { googleTranslateUrl } from '../utils/translateUrl'
 import LanguageToggle from '../components/LanguageToggle'
 
@@ -76,6 +79,55 @@ export default function ArticleWebViewScreen({
 
     const currentUrl = processUrl(url, translated, targetLang)
 
+    // ── "Sayfayı kaydet" (Ctrl+S) ──
+    // O an ekranda görünen sayfanın DOM'u alınır (JS ile oluşan içerik, açılmış
+    // lazy görseller ve çevrilmiş görünüm dahil), CSS/görseller gömülerek tek
+    // HTML dosyası olarak kaydedilir.
+    // Paketin ref tipi platforma göre farklı tanımlı; ihtiyacımız tek metot
+    const webRef = useRef<any>(null) as { current: { injectJavaScript: (js: string) => void } | null }
+    const { downloadArticle, isDownloaded } = useDownloads()
+    const [saving, setSaving] = useState(false)
+    const pageId = makeStableId('web', url)
+    const alreadySaved = isDownloaded(pageId)
+
+    const handleSave = () => {
+        if (saving) return
+        setSaving(true)
+        webRef.current?.injectJavaScript(CAPTURE_DOM_SCRIPT)
+    }
+
+    const handleMessage = (e: WebViewMessageEvent) => {
+        let msg: any
+        try {
+            msg = JSON.parse(e.nativeEvent.data)
+        } catch {
+            return
+        }
+        if (msg?.type === 'scio-snapshot-error') {
+            setSaving(false)
+            Alert.alert('Kaydedilemedi', msg.message || 'Sayfa okunamadı.')
+            return
+        }
+        if (msg?.type !== 'scio-snapshot' || typeof msg.html !== 'string') return
+        downloadArticle({
+            id: pageId,
+            source: domain || 'web',
+            title: title || msg.title || domain,
+            description: '',
+            link: url,
+            capturedHtml: msg.html,
+            capturedUrl: msg.url,
+        })
+            .then(() =>
+                Alert.alert(
+                    'Sayfa kaydedildi',
+                    'Görselleri ve düzeniyle birlikte kaydedildi. Kayıtlılar bölümünden internetsiz açabilirsin.',
+                ),
+            )
+            .catch((err) => Alert.alert('Kaydedilemedi', err?.message || 'Bir hata oluştu.'))
+            .finally(() => setSaving(false))
+    }
+
     return (
         <View style={{ flex: 1, backgroundColor: colors.cream }}>
             {/* Nav */}
@@ -93,6 +145,26 @@ export default function ArticleWebViewScreen({
                     <Text style={[s.navTitle, { color: colors.ink }]} numberOfLines={1}>
                         {title}
                     </Text>
+                    <Pressable
+                        onPress={handleSave}
+                        disabled={saving}
+                        hitSlop={8}
+                        accessibilityLabel={
+                            saving ? 'Sayfa kaydediliyor' : alreadySaved ? 'Sayfayı yeniden kaydet' : 'Sayfayı çevrimdışı için kaydet'
+                        }
+                        accessibilityRole="button"
+                        style={{ padding: 6 }}
+                    >
+                        {saving ? (
+                            <ActivityIndicator size="small" color={colors.burgundy} />
+                        ) : (
+                            <Ionicons
+                                name={alreadySaved ? 'checkmark-circle' : 'download-outline'}
+                                size={20}
+                                color={colors.burgundy}
+                            />
+                        )}
+                    </Pressable>
                 </View>
                 <Text style={[s.domainLabel, { color: colors.mutedLight }]}>{domain}</Text>
             </View>
@@ -111,8 +183,12 @@ export default function ArticleWebViewScreen({
 
             {/* WebView */}
             <WebView
+                ref={(r: any) => {
+                    webRef.current = r
+                }}
                 key={`${currentUrl}#${reloadKey}`}
                 source={{ uri: currentUrl }}
+                onMessage={handleMessage}
                 style={{ flex: 1, backgroundColor: colors.cream }}
                 onLoadStart={() => setProgress(0.08)}
                 onLoadProgress={(e) => setProgress(e.nativeEvent.progress)}

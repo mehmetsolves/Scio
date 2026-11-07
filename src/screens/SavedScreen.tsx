@@ -319,7 +319,7 @@ export default function SavedScreen({
                                             </Text>
                                             <Text style={[s.metaDot, { color: colors.inputBorder }]}>·</Text>
                                             <Text style={[s.metaText, { color: colors.mutedLight }]}>
-                                                Offline oku</Text>
+                                                {entry.pageFile ? "Tam sayfa · offline oku" : "Offline oku"}</Text>
                                             <Ionicons name="chevron-forward" size={12} color={colors.mutedLight} />
                                         </View>
                                     </Pressable>

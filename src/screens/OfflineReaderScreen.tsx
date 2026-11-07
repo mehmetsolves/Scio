@@ -1,5 +1,8 @@
-import { useState } from 'react'
-import { View, Text, ScrollView, Pressable, StyleSheet } from 'react-native'
+import { useMemo, useState } from 'react'
+import { View, Text, ScrollView, Pressable, StyleSheet, Linking } from 'react-native'
+import { WebView } from 'react-native-webview'
+import Ionicons from '@expo/vector-icons/Ionicons'
+import { pageFile, pagesDirUri } from '../store/pageStore'
 import type { ColorScheme } from '../theme/colors'
 import { translatedLangOf, type DownloadedArticle } from '../store/DownloadsContext'
 import { getLanguage } from '../api/languages'
@@ -10,8 +13,16 @@ const SERIF_SEMIBOLD = 'SourceSerif4_600SemiBold'
 const SANS = 'Inter_400Regular'
 const SANS_SEMIBOLD = 'Inter_600SemiBold'
 
-// A clean-text offline reader. Renders the stored original/translation pair and
-// never calls the network — that's the whole point of a downloaded article.
+// Çevrimdışı okuyucu, iki görünüm:
+//  • Sayfa: indirilen tam HTML kopyası (CSS ve görseller gömülü) — sitede
+//    göründüğü gibi. JS kapalı; bağlantılar sistem tarayıcısında açılır.
+//  • Metin: çıkarılmış düz metin + kayıtlı çeviri.
+// Hiçbiri ağa ihtiyaç duymaz.
+
+function formatBytes(n?: number): string {
+    if (!n) return ''
+    return n > 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`
+}
 export default function OfflineReaderScreen({
     article,
     onBack,
@@ -26,6 +37,18 @@ export default function OfflineReaderScreen({
     const origLang = getLanguage(article.origLang)
     const [lang, setLang] = useState<'orig' | 'tr'>('tr')
     const [showSynopsis, setShowSynopsis] = useState(true)
+
+    // Tam sayfa kopyası varsa (yeni indirmeler) varsayılan görünüm "Sayfa"
+    const pageUri = useMemo(() => {
+        if (!article.pageFile) return null
+        try {
+            const f = pageFile(article.pageFile)
+            return f.exists ? f.uri : null
+        } catch {
+            return null
+        }
+    }, [article.pageFile])
+    const [view, setView] = useState<'page' | 'text'>(pageUri ? 'page' : 'text')
 
     const isTrShown = lang === 'tr'
     const title = isTrShown && article.titleTr ? article.titleTr : article.title
@@ -53,6 +76,33 @@ export default function OfflineReaderScreen({
                     <Text style={[s.navTitle, { color: colors.ink }]} numberOfLines={1}>
                         {article.source}
                     </Text>
+                    {pageUri && (
+                        <View style={[s.segment, { borderColor: colors.border }]}>
+                            {(['page', 'text'] as const).map((v) => {
+                                const active = view === v
+                                return (
+                                    <Pressable
+                                        key={v}
+                                        onPress={() => setView(v)}
+                                        accessibilityRole="button"
+                                        accessibilityState={{ selected: active }}
+                                        accessibilityLabel={v === 'page' ? 'Sayfa görünümü' : 'Metin görünümü'}
+                                        style={[s.segmentBtn, active && { backgroundColor: colors.burgundy }]}
+                                    >
+                                        <Ionicons
+                                            name={v === 'page' ? 'globe-outline' : 'document-text-outline'}
+                                            size={13}
+                                            color={active ? '#FFFFFF' : colors.muted}
+                                        />
+                                        <Text style={[s.segmentText, { color: active ? '#FFFFFF' : colors.muted }]}>
+                                            {v === 'page' ? 'Sayfa' : 'Metin'}
+                                        </Text>
+                                    </Pressable>
+                                )
+                            })}
+                        </View>
+                    )}
+                    {view === 'text' && (
                     <Pressable
                         onPress={toggleLang}
                         hitSlop={8}
@@ -65,8 +115,30 @@ export default function OfflineReaderScreen({
                             {isTrShown ? `Orijinal (${origLang.label})` : trLang.label}
                         </Text>
                     </Pressable>
+                    )}
                 </View>
             </View>
+
+            {view === 'page' && pageUri ? (
+                <WebView
+                    source={{ uri: pageUri }}
+                    style={{ flex: 1, backgroundColor: '#FFFFFF' }}
+                    originWhitelist={['*']}
+                    // Kayıtlı dosyayı okuyabilmek için
+                    allowFileAccess
+                    allowFileAccessFromFileURLs
+                    allowingReadAccessToURL={pagesDirUri()}
+                    // Kaydedilen sayfada script yok; yine de JS kapalı açılır
+                    javaScriptEnabled={false}
+                    // Bağlantıya dokununca sistem tarayıcısında aç (internet
+                    // gerekir); kayıtlı sayfa yerinde kalır
+                    onShouldStartLoadWithRequest={(req) => {
+                        if (/^(file|about|data|blob):/i.test(req.url)) return true
+                        if (/^https?:/i.test(req.url)) Linking.openURL(req.url).catch(() => {})
+                        return false
+                    }}
+                />
+            ) : (
 
             <ScrollView style={{ flex: 1 }} contentContainerStyle={s.bodyContainer}>
                 {/* Title */}
@@ -116,6 +188,13 @@ export default function OfflineReaderScreen({
                 )}
                 <View style={{ height: 40 }} />
             </ScrollView>
+            )}
+            {view === 'page' && article.pageBytes ? (
+                <Text style={[s.pageInfo, { color: colors.mutedLight, borderTopColor: colors.border, backgroundColor: colors.cream }]}>
+                    Çevrimdışı kopya · {formatBytes(article.pageBytes)}
+                    {article.pageImages ? ` · ${article.pageImages} görsel` : ''}
+                </Text>
+            ) : null}
         </View>
     )
 }
@@ -146,6 +225,30 @@ const s = StyleSheet.create({
         paddingHorizontal: 12,
         paddingVertical: 6,
         borderRadius: 18,
+    },
+    segment: {
+        flexDirection: 'row',
+        borderWidth: 1,
+        borderRadius: 16,
+        overflow: 'hidden',
+    },
+    segmentBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        paddingHorizontal: 10,
+        paddingVertical: 5,
+    },
+    segmentText: {
+        fontFamily: SANS_SEMIBOLD,
+        fontSize: 11,
+    },
+    pageInfo: {
+        fontFamily: SANS,
+        fontSize: 11,
+        textAlign: 'center',
+        paddingVertical: 6,
+        borderTopWidth: 1,
     },
     langChipText: {
         fontFamily: SANS_SEMIBOLD,

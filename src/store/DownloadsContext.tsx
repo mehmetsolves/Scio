@@ -3,6 +3,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage'
 import { extractArticle, translateText, type ExtractedArticle } from '../api/client'
 import type { Engine, TranslationStyle } from './SettingsContext'
 import { useSettings } from './SettingsContext'
+import { snapshotPage } from '../api/pageSnapshot'
+import { savePageHtml, deletePageHtml } from './pageStore'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -25,6 +27,11 @@ export interface DownloadedArticle {
     imageUrl?: string
     link: string
     savedAt: number
+    // Tam sayfa kopyası (HTML + gömülü CSS/görseller), belge klasöründe dosya.
+    // Eski kayıtlarda yok → yalnızca metin görünümü.
+    pageFile?: string
+    pageBytes?: number
+    pageImages?: number
 }
 
 export interface DownloadMeta {
@@ -34,6 +41,10 @@ export interface DownloadMeta {
     description: string
     link: string
     imageUrl?: string
+    // WebView'da o an görünen sayfanın DOM'u. Verilirse sayfa ağdan yeniden
+    // çekilmez; JS ile oluşan içerik ve çevrilmiş görünüm de kaydedilir.
+    capturedHtml?: string
+    capturedUrl?: string
 }
 
 interface DownloadsContextValue {
@@ -151,6 +162,9 @@ export function DownloadsProvider({ children }: { children: ReactNode }) {
 
     const removeDownload = (id: string) => {
         setDownloaded((prev) => {
+            const removed = prev.find((e) => e.id === id)
+            // Kaydedilmiş sayfa dosyasını da sil (yoksa depoda yetim kalır)
+            if (removed?.pageFile) deletePageHtml(removed.pageFile)
             const next = prev.filter((e) => e.id !== id)
             AsyncStorage.removeItem(entryKey(id)).catch((e) => console.warn('Failed to delete download:', e))
             updateIndex(next)
@@ -188,7 +202,25 @@ export function DownloadsProvider({ children }: { children: ReactNode }) {
 
     const downloadArticle = async (meta: DownloadMeta) => {
         if (!meta.link) return
-        const extracted = await extractArticle(meta.link, meta.source)
+
+        // İki iş paralel: (1) metin çıkarma → çevrilebilir metin görünümü,
+        // (2) tam sayfa kopyası → "Ctrl+S" gibi orijinal görünüm. Biri
+        // başarısız olursa diğeriyle kayıt yine tamamlanır.
+        const pageUrl = meta.capturedUrl || meta.link
+        const [extractRes, pageRes] = await Promise.allSettled([
+            extractArticle(meta.link, meta.source),
+            (async () => {
+                const snap = await snapshotPage(pageUrl, { html: meta.capturedHtml })
+                const saved = await savePageHtml(meta.id, snap.html)
+                return { fileName: saved.fileName, bytes: snap.bytes, images: snap.images }
+            })(),
+        ])
+        const page = pageRes.status === 'fulfilled' ? pageRes.value : null
+        if (pageRes.status === 'rejected') console.warn('Page snapshot failed:', pageRes.reason)
+        if (extractRes.status === 'rejected' && !page) {
+            throw extractRes.reason instanceof Error ? extractRes.reason : new Error('Makale indirilemedi')
+        }
+        const extracted = extractRes.status === 'fulfilled' ? extractRes.value : undefined
 
         const origLang = detectOrigLang(meta.source, extracted)
         // Hedef: global targetLanguage. Makale zaten o dildeyse karşı dile
@@ -223,6 +255,9 @@ export function DownloadsProvider({ children }: { children: ReactNode }) {
             imageUrl: extracted?.imageUrl || meta.imageUrl,
             link: meta.link,
             savedAt: Date.now(),
+            pageFile: page?.fileName,
+            pageBytes: page?.bytes,
+            pageImages: page?.images,
         }
 
         setDownloaded((prev) => {
