@@ -86,6 +86,21 @@ export const FETCH_HEADERS = {
 
 // ── XML yardımcıları (evrimagaci.ts ile ortak) ──────────────────────────────
 import { extractTag, extractAttribute, stripHtml, makeStableId } from './rss'
+import { searchItems } from '../utils/search'
+
+// Tek bir yavaş kaynak tüm akışı bekletmesin: her feed isteği bu sürede
+// bitmezse iptal edilir ve o kaynak boş sayılır.
+export const FEED_TIMEOUT_MS = 8000
+
+// Önbellek anahtarı: gömülü haber kaynakları (özel kaynaklar ayrı indekste).
+export const NEWS_CACHE_KEY = 'news:builtin'
+// Kaynakların hepsi başarısızsa (çevrimdışı vb.) boş liste döndürmek yerine
+// hata fırlatır: önbellekteki son iyi liste boş listeyle ezilmesin.
+export async function fetchBuiltinNews(): Promise<NewsArticle[]> {
+    const all = await fetchAllNews(undefined, { sources: NEWS_SOURCES })
+    if (all.length === 0) throw new Error('Haber kaynaklarına ulaşılamadı. İnternet bağlantını kontrol et.')
+    return all
+}
 
 // Some RSS feeds (e.g. Sözcü) emit pubDate values that `new Date()` can't parse
 // (Turkish month names, extra commas, etc.). Convert safely without throwing.
@@ -152,7 +167,7 @@ function parseEntry(content: string, sourceId: NewsSourceId, isAtom: boolean): N
 
 // Hem RSS (<rss><item>) hem Atom (<feed><entry>) desteklenir. NTV Atom kullanıyor
 // ve RSS'teki gibi <item> etiketi aramayı göçürürdü.
-function parseNewsRSS(xml: string, sourceId: NewsSourceId): NewsArticle[] {
+export function parseNewsRSS(xml: string, sourceId: NewsSourceId): NewsArticle[] {
     const articles: NewsArticle[] = []
 
     const [openTag, closeTag, isAtom] = xml.includes('<entry')
@@ -195,6 +210,26 @@ export function normalizeFeedUrl(url: string): string {
     return trimmed.replace(/^http:\/\//i, 'https://')
 }
 
+// ── Zaman aşımlı fetch ──────────────────────────────────────────────────────
+
+export async function fetchWithTimeout(url: string, timeoutMs = FEED_TIMEOUT_MS, outer?: AbortSignal): Promise<Response> {
+    const ctrl = new AbortController()
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs)
+    const onOuterAbort = () => ctrl.abort()
+    outer?.addEventListener?.('abort', onOuterAbort)
+    try {
+        return await fetch(url, { headers: FETCH_HEADERS, signal: ctrl.signal })
+    } catch (err: any) {
+        if (ctrl.signal.aborted && !outer?.aborted) {
+            throw new Error('Kaynak zamanında yanıt vermedi')
+        }
+        throw err
+    } finally {
+        clearTimeout(timer)
+        outer?.removeEventListener?.('abort', onOuterAbort)
+    }
+}
+
 // ── Fetch from a single source ──────────────────────────────────────────────
 
 export async function fetchNewsFromSource(
@@ -204,7 +239,7 @@ export async function fetchNewsFromSource(
     try {
         // UA olmadan bazı sunucular 403 dönder (Sözcü, çoğu yerel site).
         // İçerik türü RSS veya Atom olarak doğrulanmadan işlem dener.
-        const res = await fetch(source.rssUrl, { headers: FETCH_HEADERS, signal: opts.signal })
+        const res = await fetchWithTimeout(source.rssUrl, FEED_TIMEOUT_MS, opts.signal)
         if (!res.ok) {
             console.warn(`${source.label} RSS failed: HTTP ${res.status}`)
             return []
@@ -246,14 +281,16 @@ export async function fetchAllNews(
 
 // ── Search/filter news by keyword ───────────────────────────────────────────
 
-export function filterNews(articles: NewsArticle[], query: string): NewsArticle[] {
-    const lowerQuery = query.toLowerCase()
-    return articles.filter(
-        (a) =>
-            a.title.toLowerCase().includes(lowerQuery) ||
-            a.description.toLowerCase().includes(lowerQuery) ||
-            (a.category && a.category.toLowerCase().includes(lowerQuery)),
-    )
+// Türkçe karakter duyarsız, çok kelimeli arama (bkz. utils/search.ts).
+// Eskiden `toLowerCase().includes` kullanılıyordu: "istanbul" araması
+// "İstanbul" başlığını bulamıyordu.
+export function filterNews(articles: NewsArticle[], query: string, sources?: NewsSource[]): NewsArticle[] {
+    return searchItems(articles, query, (a) => [
+        a.title,
+        a.description,
+        a.category,
+        getNewsSourceMeta(a.source, sources)?.label,
+    ])
 }
 
 // ── Format date for display ─────────────────────────────────────────────────

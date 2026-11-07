@@ -1,3 +1,4 @@
+import { searchItems } from '../utils/search'
 // ─── Hacker News API Client ──────────────────────────────────────────────────
 //
 // Uses the official HN Firebase API: https://github.com/HackerNewsAPI/HN-API
@@ -84,16 +85,12 @@ export async function fetchItemsProgressive(
 // HN API'de sunucu tarafı arama yok, bu yüzden başlık ve domain üzerinde
 // istemci filtresi uygulanıyor. filterByDate ile aynı desen.
 export function filterHN(items: HNItem[], query: string): HNItem[] {
-    const q = query.trim().toLowerCase()
-    if (!q) return items
-    return items.filter((item) => {
-        const domain = item.url ? extractDomain(item.url).toLowerCase() : ''
-        return (
-            item.title.toLowerCase().includes(q) ||
-            domain.includes(q) ||
-            (item.by ?? '').toLowerCase().includes(q)
-        )
-    })
+    return searchItems(items, query, (item) => [
+        item.title,
+        item.url ? extractDomain(item.url) : '',
+        item.by,
+        item.text,
+    ])
 }
 
 // ── Helper: Extract domain from URL ──────────────────────────────────────────

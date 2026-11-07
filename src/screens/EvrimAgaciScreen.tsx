@@ -1,19 +1,22 @@
-import { useState, useEffect } from 'react'
-import {
-    View,
-    Text,
-    ScrollView,
-    Pressable,
-    StyleSheet,
-    ActivityIndicator,
-    RefreshControl,
-    Alert,
-} from 'react-native'
+import { memo, useCallback, useMemo, useState } from 'react'
+import { View, Text, Pressable, StyleSheet, RefreshControl, Alert, FlatList } from 'react-native'
 import Ionicons from '@expo/vector-icons/Ionicons'
 import { MenuButton } from './HamburgerMenu'
 import { useSavedArticles } from '../store/SavedArticlesContext'
 import { useDownloads } from '../store/DownloadsContext'
-import { fetchEvrimAgaciArticles, formatEvrimDate, type EvrimAgaciArticle } from '../api/evrimagaci'
+import { useCustomSources } from '../store/CustomSourcesContext'
+import {
+    fetchEvrimAgaciArticles,
+    filterEvrim,
+    formatEvrimDate,
+    EVRIM_CACHE_KEY,
+    type EvrimAgaciArticle,
+} from '../api/evrimagaci'
+import { useCachedResource } from '../api/cache'
+import { useDebouncedValue } from '../hooks/useDebouncedValue'
+import SearchBar from '../components/SearchBar'
+import FilterChips, { type FilterOption } from '../components/FilterChips'
+import { SkeletonList, EmptyState } from '../components/ListStates'
 import type { ColorScheme } from '../theme/colors'
 
 const SERIF_BOLD = 'SourceSerif4_700Bold'
@@ -25,7 +28,116 @@ const SANS_SEMIBOLD = 'Inter_600SemiBold'
 const EA_GREEN = '#2D8C3E'
 const EA_GREEN_DARK = '#1B6B2A'
 
-export default function EvrimAgaciScreen({
+// Evrim Ağacı makalesi ya da "Bilim" kategorisinde eklenmiş özel kaynak
+// makalesi. Özel kaynaklarda `sourceId` dolu; kaydet (kalp) yalnızca Evrim
+// Ağacı için var çünkü Kayıtlılar'da "Evrim Ağacı" rozetiyle listeleniyor.
+interface ScienceItem extends EvrimAgaciArticle {
+    sourceId?: string
+}
+
+const ScienceCard = memo(function ScienceCard({
+    article,
+    colors,
+    onOpenUrl,
+}: {
+    article: ScienceItem
+    colors: ColorScheme
+    onOpenUrl: (url: string, title: string) => void
+}) {
+    const { isEvrimSaved, toggleEvrimSave } = useSavedArticles()
+    const { downloadArticle, isDownloaded } = useDownloads()
+    const [downloading, setDownloading] = useState(false)
+    const saved = isDownloaded(article.id)
+    const isEvrim = !article.sourceId
+    const liked = isEvrim && isEvrimSaved(article.id)
+
+    return (
+        <Pressable
+            onPress={() => onOpenUrl(article.link, article.title)}
+            style={({ pressed }) => [
+                s.card,
+                { backgroundColor: pressed ? colors.pressedCard : colors.card, borderColor: colors.border },
+            ]}
+        >
+            <View style={[s.accent, { backgroundColor: isEvrim ? EA_GREEN : colors.inputBorder }]} />
+
+            <View style={s.cardInner}>
+                <View style={s.cardHeader}>
+                    <Text style={[s.categoryText, { color: EA_GREEN_DARK, flex: 1 }]} numberOfLines={1}>
+                        {article.category}
+                    </Text>
+                    <View style={s.actions}>
+                        <Pressable
+                            onPress={(e) => {
+                                e.stopPropagation?.()
+                                if (downloading || saved) return
+                                setDownloading(true)
+                                downloadArticle({
+                                    id: article.id,
+                                    source: article.sourceId ?? 'evrimagaci',
+                                    title: article.title,
+                                    description: article.description,
+                                    link: article.link,
+                                    imageUrl: article.imageUrl,
+                                })
+                                    .catch((err) => Alert.alert('İndirilemedi', err.message || 'Bir hata oluştu.'))
+                                    .finally(() => setDownloading(false))
+                            }}
+                            hitSlop={10}
+                            disabled={downloading}
+                            accessibilityLabel={saved ? 'İndirildi' : downloading ? 'İndiriliyor' : 'Çevrimdışı için indir'}
+                            accessibilityRole="button"
+                            style={s.actionBtn}
+                        >
+                            <Ionicons
+                                name={saved ? 'checkmark-circle' : downloading ? 'ellipsis-horizontal' : 'download-outline'}
+                                size={17}
+                                color={saved ? EA_GREEN : downloading ? colors.mutedLight : colors.muted}
+                            />
+                        </Pressable>
+                        {isEvrim && (
+                            <Pressable
+                                onPress={(e) => {
+                                    e.stopPropagation?.()
+                                    toggleEvrimSave(article)
+                                }}
+                                hitSlop={10}
+                                accessibilityLabel={liked ? 'Kaydedildi, kaldır' : 'Makaleyi kaydet'}
+                                accessibilityRole="button"
+                                style={s.actionBtn}
+                            >
+                                <Ionicons name={liked ? 'heart' : 'heart-outline'} size={17} color={liked ? EA_GREEN : colors.muted} />
+                            </Pressable>
+                        )}
+                    </View>
+                </View>
+
+                <Text style={[s.cardTitle, { color: colors.ink }]} numberOfLines={3}>
+                    {article.title}
+                </Text>
+
+                {article.description ? (
+                    <Text style={[s.cardDesc, { color: colors.cardAbstract }]} numberOfLines={2}>
+                        {article.description}
+                    </Text>
+                ) : null}
+
+                <View style={s.cardFooter}>
+                    <View style={s.dateRow}>
+                        <Ionicons name="time-outline" size={12} color={colors.mutedLight} />
+                        <Text style={[s.dateText, { color: colors.mutedLight }]}>{formatEvrimDate(article.pubDate)}</Text>
+                    </View>
+                    <View style={s.readMore}>
+                        <Text style={[s.readMoreText, { color: EA_GREEN }]}>Oku</Text>
+                        <Ionicons name="chevron-forward" size={13} color={EA_GREEN} />
+                    </View>
+                </View>
+            </View>
+        </Pressable>
+    )
+})
+
+function EvrimAgaciScreen({
     colors,
     onOpenUrl,
     onOpenMenu,
@@ -34,30 +146,76 @@ export default function EvrimAgaciScreen({
     onOpenUrl: (url: string, title: string) => void
     onOpenMenu?: () => void
 }) {
-    const { isEvrimSaved, toggleEvrimSave } = useSavedArticles()
-    const { downloadArticle, isDownloaded } = useDownloads()
-    const [downloadingId, setDownloadingId] = useState<string | null>(null)
-    const [articles, setArticles] = useState<EvrimAgaciArticle[]>([])
-    const [loading, setLoading] = useState(true)
-    const [refreshing, setRefreshing] = useState(false)
-    const [error, setError] = useState<string | null>(null)
+    const feed = useCachedResource(EVRIM_CACHE_KEY, fetchEvrimAgaciArticles, { persist: true })
+    const { sourcesByCategory, articlesByCategory, syncSources } = useCustomSources()
 
-    useEffect(() => {
-        loadArticles()
-    }, [])
+    const [query, setQuery] = useState('')
+    const debouncedQuery = useDebouncedValue(query)
+    const [sourceFilter, setSourceFilter] = useState('all')
+    const [pullRefreshing, setPullRefreshing] = useState(false)
 
-    const loadArticles = (isRefresh = false) => {
-        if (isRefresh) setRefreshing(true)
-        else setLoading(true)
-        setError(null)
-        fetchEvrimAgaciArticles()
-            .then(setArticles)
-            .catch((err) => setError(err.message || 'Makaleler yüklenemedi'))
-            .finally(() => {
-                setLoading(false)
-                setRefreshing(false)
-            })
-    }
+    const scienceSources = useMemo(() => sourcesByCategory('science'), [sourcesByCategory])
+
+    // Özel bilim kaynaklarının makaleleri aynı kart modeline çevrilir
+    const customItems: ScienceItem[] = useMemo(() => {
+        const labels = new Map(scienceSources.map((src) => [src.id, src.label]))
+        return articlesByCategory('science').map((a) => ({
+            id: a.id,
+            title: a.title,
+            description: a.description,
+            link: a.link,
+            pubDate: a.pubDate,
+            category: labels.get(a.source) ?? a.category ?? 'Bilim',
+            imageUrl: a.imageUrl,
+            sourceId: a.source,
+        }))
+    }, [articlesByCategory, scienceSources])
+
+    const filterOptions: FilterOption[] = useMemo(
+        () =>
+            scienceSources.length === 0
+                ? []
+                : [
+                      { id: 'all', label: 'Tümü' },
+                      { id: 'evrimagaci', label: 'Evrim Ağacı' },
+                      ...scienceSources.map((src) => ({ id: src.id, label: src.label })),
+                  ],
+        [scienceSources],
+    )
+
+    const visible = useMemo(() => {
+        const evrim: ScienceItem[] = feed.data ?? []
+        let pool: ScienceItem[]
+        if (sourceFilter === 'all') {
+            pool = [...evrim, ...customItems].sort(
+                (a, b) => new Date(b.pubDate).getTime() - new Date(a.pubDate).getTime(),
+            )
+        } else if (sourceFilter === 'evrimagaci') {
+            pool = evrim
+        } else {
+            pool = customItems.filter((a) => a.sourceId === sourceFilter)
+        }
+        return filterEvrim(pool, debouncedQuery) as ScienceItem[]
+    }, [feed.data, customItems, sourceFilter, debouncedQuery])
+
+    const searching = debouncedQuery.trim().length > 0
+
+    const refreshFeed = feed.refresh
+    const handleRefresh = useCallback(async () => {
+        setPullRefreshing(true)
+        try {
+            await Promise.all([refreshFeed(), syncSources(scienceSources.map((src) => src.id))])
+        } finally {
+            setPullRefreshing(false)
+        }
+    }, [refreshFeed, syncSources, scienceSources])
+
+    const renderItem = useCallback(
+        ({ item }: { item: ScienceItem }) => <ScienceCard article={item} colors={colors} onOpenUrl={onOpenUrl} />,
+        [colors, onOpenUrl],
+    )
+
+    const hasData = (feed.data?.length ?? 0) + customItems.length > 0
 
     return (
         <View style={{ flex: 1, backgroundColor: colors.cream }}>
@@ -67,12 +225,10 @@ export default function EvrimAgaciScreen({
                     <View style={{ flex: 1 }}>
                         <Text style={[s.headerBrand, { color: EA_GREEN }]}>EVRİM AĞACI</Text>
                         <Text style={[s.screenTitle, { color: colors.ink }]}>Bilim</Text>
-                        <Text style={[s.screenSubtitle, { color: colors.mutedLight }]}>
-                            Bilim, teknoloji ve doğa
-                        </Text>
+                        <Text style={[s.screenSubtitle, { color: colors.mutedLight }]}>Bilim, teknoloji ve doğa</Text>
                     </View>
                     <Pressable
-                        onPress={() => loadArticles(true)}
+                        onPress={handleRefresh}
                         hitSlop={6}
                         accessibilityLabel="Makaleleri yenile"
                         accessibilityRole="button"
@@ -82,154 +238,93 @@ export default function EvrimAgaciScreen({
                     </Pressable>
                     {onOpenMenu && <MenuButton onPress={onOpenMenu} colors={colors} />}
                 </View>
+
+                <SearchBar
+                    value={query}
+                    onChangeText={setQuery}
+                    placeholder="Bilim makalelerinde ara..."
+                    accent={EA_GREEN}
+                    colors={colors}
+                    busy={query.trim() !== debouncedQuery.trim()}
+                />
+                <FilterChips
+                    options={filterOptions}
+                    value={sourceFilter}
+                    onChange={setSourceFilter}
+                    accent={EA_GREEN}
+                    colors={colors}
+                />
             </View>
 
             {/* ── İçerik ── */}
-            {loading ? (
-                <View style={s.centerBox}>
-                    <ActivityIndicator size="large" color={EA_GREEN} />
-                    <Text style={[s.statusText, { color: colors.muted }]}>Makaleler yükleniyor...</Text>
-                </View>
-            ) : error ? (
-                <View style={s.centerBox}>
-                    <Ionicons name="cloud-offline-outline" size={36} color={colors.mutedLight} />
-                    <Text style={[s.statusText, { color: colors.ink }]}>Makaleler yüklenemedi</Text>
-                    <Text style={[s.statusSubText, { color: colors.muted }]}>{error}</Text>
-                    <Pressable onPress={() => loadArticles()} style={[s.retryBtn, { backgroundColor: EA_GREEN }]}>
-                        <Text style={s.retryBtnText}>Tekrar dene</Text>
-                    </Pressable>
-                </View>
+            {feed.loading && !hasData ? (
+                <SkeletonList colors={colors} />
+            ) : feed.error && !hasData ? (
+                <EmptyState
+                    icon="cloud-offline-outline"
+                    title="Makaleler yüklenemedi"
+                    subtitle={feed.error}
+                    actionLabel="Tekrar dene"
+                    onAction={refreshFeed}
+                    accent={EA_GREEN}
+                    colors={colors}
+                />
             ) : (
-                <ScrollView
+                <FlatList
+                    data={visible}
+                    keyExtractor={(a) => a.id}
+                    renderItem={renderItem}
                     style={{ flex: 1 }}
                     contentContainerStyle={{ padding: 16, paddingBottom: 28 }}
+                    keyboardShouldPersistTaps="handled"
+                    keyboardDismissMode="on-drag"
+                    initialNumToRender={8}
+                    maxToRenderPerBatch={8}
+                    windowSize={7}
+                    ListHeaderComponent={
+                        searching ? (
+                            <Text style={[s.dateText, { color: colors.mutedLight, marginBottom: 10 }]}>
+                                "{debouncedQuery.trim()}" için {visible.length} sonuç
+                            </Text>
+                        ) : (
+                            <View style={[s.infoBanner, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                                <Ionicons name="flask-outline" size={15} color={EA_GREEN} style={{ marginTop: 1 }} />
+                                <Text style={[s.infoText, { color: colors.muted }]}>
+                                    Makaleye dokunarak oku. Tam erişim için Evrim Ağacı oturumu gerekebilir.
+                                </Text>
+                            </View>
+                        )
+                    }
+                    ListEmptyComponent={
+                        searching ? (
+                            <EmptyState
+                                icon="search-outline"
+                                title="Sonuç bulunamadı"
+                                subtitle={`"${debouncedQuery.trim()}" ile eşleşen makale yok.`}
+                                actionLabel="Aramayı temizle"
+                                onAction={() => setQuery('')}
+                                accent={EA_GREEN}
+                                colors={colors}
+                            />
+                        ) : (
+                            <EmptyState icon="telescope-outline" title="Makale bulunamadı" accent={EA_GREEN} colors={colors} />
+                        )
+                    }
                     refreshControl={
                         <RefreshControl
-                            refreshing={refreshing}
-                            onRefresh={() => loadArticles(true)}
+                            refreshing={pullRefreshing}
+                            onRefresh={handleRefresh}
                             colors={[EA_GREEN]}
                             tintColor={EA_GREEN}
                         />
                     }
-                >
-                    <View style={[s.infoBanner, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                        <Ionicons name="flask-outline" size={15} color={EA_GREEN} style={{ marginTop: 1 }} />
-                        <Text style={[s.infoText, { color: colors.muted }]}>
-                            Makaleye dokunarak oku. Tam erişim için Evrim Ağacı oturumu gerekebilir.
-                        </Text>
-                    </View>
-
-                    {articles.map((article) => {
-                        const downloading = downloadingId === article.id
-                        const saved = isDownloaded(article.id)
-                        const liked = isEvrimSaved(article.id)
-                        return (
-                            <Pressable
-                                key={article.id}
-                                onPress={() => onOpenUrl(article.link, article.title)}
-                                style={({ pressed }) => [
-                                    s.card,
-                                    {
-                                        backgroundColor: pressed ? colors.pressedCard : colors.card,
-                                        borderColor: colors.border,
-                                    },
-                                ]}
-                            >
-                                <View style={[s.accent, { backgroundColor: EA_GREEN }]} />
-
-                                <View style={s.cardInner}>
-                                    <View style={s.cardHeader}>
-                                        <Text style={[s.categoryText, { color: EA_GREEN_DARK }]}>
-                                            {article.category}
-                                        </Text>
-                                        <View style={s.actions}>
-                                            <Pressable
-                                                onPress={(e) => {
-                                                    e.stopPropagation?.()
-                                                    if (downloading || saved) return
-                                                    setDownloadingId(article.id)
-                                                    downloadArticle({
-                                                        id: article.id,
-                                                        source: 'evrimagaci',
-                                                        title: article.title,
-                                                        description: article.description,
-                                                        link: article.link,
-                                                        imageUrl: article.imageUrl,
-                                                    })
-                                                        .catch((err) => Alert.alert('İndirilemedi', err.message || 'Bir hata oluştu.'))
-                                                        .finally(() => setDownloadingId(null))
-                                                }}
-                                                hitSlop={10}
-                                                disabled={downloading}
-                                                accessibilityLabel={
-                                                    saved ? 'İndirildi' : downloading ? 'İndiriliyor' : 'Çevrimdışı için indir'
-                                                }
-                                                accessibilityRole="button"
-                                                style={s.actionBtn}
-                                            >
-                                                <Ionicons
-                                                    name={saved ? 'checkmark-circle' : downloading ? 'ellipsis-horizontal' : 'download-outline'}
-                                                    size={17}
-                                                    color={saved ? EA_GREEN : downloading ? colors.mutedLight : colors.muted}
-                                                />
-                                            </Pressable>
-                                            <Pressable
-                                                onPress={(e) => {
-                                                    e.stopPropagation?.()
-                                                    toggleEvrimSave(article)
-                                                }}
-                                                hitSlop={10}
-                                                accessibilityLabel={liked ? 'Kaydedildi, kaldır' : 'Makaleyi kaydet'}
-                                                accessibilityRole="button"
-                                                style={s.actionBtn}
-                                            >
-                                                <Ionicons
-                                                    name={liked ? 'heart' : 'heart-outline'}
-                                                    size={17}
-                                                    color={liked ? EA_GREEN : colors.muted}
-                                                />
-                                            </Pressable>
-                                        </View>
-                                    </View>
-
-                                    <Text style={[s.cardTitle, { color: colors.ink }]} numberOfLines={3}>
-                                        {article.title}
-                                    </Text>
-
-                                    {article.description ? (
-                                        <Text style={[s.cardDesc, { color: colors.cardAbstract }]} numberOfLines={2}>
-                                            {article.description}
-                                        </Text>
-                                    ) : null}
-
-                                    <View style={s.cardFooter}>
-                                        <View style={s.dateRow}>
-                                            <Ionicons name="time-outline" size={12} color={colors.mutedLight} />
-                                            <Text style={[s.dateText, { color: colors.mutedLight }]}>
-                                                {formatEvrimDate(article.pubDate)}
-                                            </Text>
-                                        </View>
-                                        <View style={s.readMore}>
-                                            <Text style={[s.readMoreText, { color: EA_GREEN }]}>Oku</Text>
-                                            <Ionicons name="chevron-forward" size={13} color={EA_GREEN} />
-                                        </View>
-                                    </View>
-                                </View>
-                            </Pressable>
-                        )
-                    })}
-
-                    {articles.length === 0 && (
-                        <View style={s.emptyBox}>
-                            <Ionicons name="telescope-outline" size={34} color={colors.mutedLight} />
-                            <Text style={[s.statusText, { color: colors.ink }]}>Makale bulunamadı</Text>
-                        </View>
-                    )}
-                </ScrollView>
+                />
             )}
         </View>
     )
 }
+
+export default memo(EvrimAgaciScreen)
 
 const s = StyleSheet.create({
     header: {

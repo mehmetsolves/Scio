@@ -6,9 +6,9 @@ const SERIF_BOLD = 'SourceSerif4_700Bold'
 const SANS = 'Inter_400Regular'
 const SANS_SEMIBOLD = 'Inter_600SemiBold'
 
-type MenuTarget = 'saved' | 'settings' | 'profile'
+type MenuTarget = 'saved' | 'sources' | 'settings' | 'profile'
 
-// Sekme olmayan ekranlar buradan açılır: Kayıtlılar, Ayarlar, Profil.
+// Sekme olmayan ekranlar buradan açılır: Kayıtlılar, Kaynaklarım, Ayarlar, Profil.
 // HNScreen'deki `datePicker` dropdown'ı pop-up deseniyle aynı (konumlandırma
 // mutlak pozisyon + elevation/shadow) ama dışarı tıklayınca kapanması için
 // bir Pressable overlay içeriyor.
@@ -27,6 +27,7 @@ export default function HamburgerMenu({
 
     const items: { id: MenuTarget; label: string; sub: string; icon: keyof typeof Ionicons.glyphMap }[] = [
         { id: 'saved', label: 'Kayıtlılar', sub: 'Kaydedilenler ve indirilenler', icon: 'bookmark-outline' },
+        { id: 'sources', label: 'Kaynaklarım', sub: 'Eklediğin siteler ve RSS', icon: 'globe-outline' },
         { id: 'settings', label: 'Ayarlar', sub: 'Kaynaklar, tema, çeviri motoru', icon: 'settings-outline' },
         { id: 'profile', label: 'Profil', sub: 'Hakkında ve istatistikler', icon: 'person-outline' },
     ]

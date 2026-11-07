@@ -1,30 +1,35 @@
-import { useState, useEffect } from 'react'
+import { memo, useCallback, useMemo, useState } from 'react'
 import {
     View,
     Text,
-    TextInput,
     ScrollView,
     Pressable,
     StyleSheet,
-    ActivityIndicator,
     RefreshControl,
     Alert,
+    FlatList,
 } from 'react-native'
 import Ionicons from '@expo/vector-icons/Ionicons'
 import { MenuButton } from './HamburgerMenu'
 import {
-    fetchAllNews,
+    filterNews,
+    fetchBuiltinNews,
     formatNewsDate,
     getNewsSourceMeta,
     NEWS_SOURCES,
+    NEWS_CACHE_KEY,
     FALLBACK_SOURCE_META,
     type NewsArticle,
     type NewsSource,
-    type NewsSourceId,
 } from '../api/news'
+import { useCachedResource } from '../api/cache'
 import { useDownloads } from '../store/DownloadsContext'
 import { useSettings } from '../store/SettingsContext'
 import { useCustomSources } from '../store/CustomSourcesContext'
+import { useDebouncedValue } from '../hooks/useDebouncedValue'
+import SearchBar from '../components/SearchBar'
+import FilterChips, { type FilterOption } from '../components/FilterChips'
+import { SkeletonList, EmptyState } from '../components/ListStates'
 import type { ColorScheme } from '../theme/colors'
 
 const SERIF_BOLD = 'SourceSerif4_700Bold'
@@ -38,7 +43,100 @@ const NEWS_RED = '#C62828'
 // Sabit alt boşluk — içeriğin alt barda kesilmesini önler
 const BOTTOM_SPACE = 28
 
-export default function NewsScreen({
+// ─── Kart ────────────────────────────────────────────────────────────────────
+// memo: arama kutusuna her yazışta tüm kartlar yeniden çizilmesin.
+
+const NewsCard = memo(function NewsCard({
+    article,
+    srcMeta,
+    colors,
+    onOpenUrl,
+}: {
+    article: NewsArticle
+    srcMeta?: NewsSource
+    colors: ColorScheme
+    onOpenUrl: (url: string, title: string) => void
+}) {
+    const { downloadArticle, isDownloaded } = useDownloads()
+    const [downloading, setDownloading] = useState(false)
+    const sourceColor = srcMeta?.color ?? FALLBACK_SOURCE_META.color
+    const alreadySaved = isDownloaded(article.id)
+
+    return (
+        <Pressable
+            onPress={() => onOpenUrl(article.link, article.title)}
+            style={({ pressed }) => [
+                s.card,
+                { backgroundColor: pressed ? colors.pressedCard : colors.card, borderColor: colors.border },
+            ]}
+        >
+            {/* Kaynak şeridi — kartın solunda kaynak rengi */}
+            <View style={[s.accent, { backgroundColor: sourceColor }]} />
+
+            <View style={s.cardInner}>
+                <View style={s.cardHeader}>
+                    <Text style={[s.sourceText, { color: sourceColor }]} numberOfLines={1}>
+                        {srcMeta?.label ?? article.source}
+                    </Text>
+                    <Text style={[s.timeText, { color: colors.mutedLight }]}>{formatNewsDate(article.pubDate)}</Text>
+                </View>
+
+                <Text style={[s.cardTitle, { color: colors.ink }]} numberOfLines={3}>
+                    {article.title}
+                </Text>
+
+                {article.description ? (
+                    <Text style={[s.cardDesc, { color: colors.cardAbstract }]} numberOfLines={2}>
+                        {article.description}
+                    </Text>
+                ) : null}
+
+                <View style={s.cardFooter}>
+                    {article.category ? (
+                        <Text style={[s.categoryText, { color: colors.mutedLight }]} numberOfLines={1}>
+                            {article.category}
+                        </Text>
+                    ) : (
+                        <View />
+                    )}
+
+                    <Pressable
+                        onPress={(e) => {
+                            e.stopPropagation?.()
+                            if (downloading || alreadySaved) return
+                            setDownloading(true)
+                            downloadArticle({
+                                id: article.id,
+                                source: article.source,
+                                title: article.title,
+                                description: article.description,
+                                link: article.link,
+                                imageUrl: article.imageUrl,
+                            })
+                                .catch((err) => Alert.alert('İndirilemedi', err.message || 'Bir hata oluştu.'))
+                                .finally(() => setDownloading(false))
+                        }}
+                        hitSlop={10}
+                        disabled={downloading}
+                        accessibilityLabel={alreadySaved ? 'İndirildi' : downloading ? 'İndiriliyor' : 'Çevrimdışı için indir'}
+                        accessibilityRole="button"
+                        style={s.saveBtn}
+                    >
+                        <Ionicons
+                            name={alreadySaved ? 'checkmark-circle' : downloading ? 'ellipsis-horizontal' : 'download-outline'}
+                            size={17}
+                            color={alreadySaved ? NEWS_RED : downloading ? colors.mutedLight : colors.muted}
+                        />
+                    </Pressable>
+                </View>
+            </View>
+        </Pressable>
+    )
+})
+
+// ─── Ekran ───────────────────────────────────────────────────────────────────
+
+function NewsScreen({
     colors,
     onOpenUrl,
     onSearch,
@@ -49,306 +147,203 @@ export default function NewsScreen({
     onSearch: (q: string, mode?: 'academic' | 'news') => void
     onOpenMenu: () => void
 }) {
-    const [articles, setArticles] = useState<NewsArticle[]>([])
-    const [loading, setLoading] = useState(true)
-    const [refreshing, setRefreshing] = useState(false)
-    const [error, setError] = useState<string | null>(null)
-    const [activeFilter, setActiveFilter] = useState<'all' | NewsSourceId>('all')
-    const [focused, setFocused] = useState(false)
-    const [query, setQuery] = useState('')
-    const { downloadArticle, isDownloaded } = useDownloads()
     const { selectedTopics } = useSettings()
-    const { customSources } = useCustomSources()
-    const [downloadingId, setDownloadingId] = useState<string | null>(null)
+    const { sourcesByCategory, articlesByCategory, syncSources } = useCustomSources()
 
-    // Haber filtresi: kullanıcının eklediği özel kaynaklar + gömülü kaynaklar.
-    // Arama sonuçları, detay göstergeler ve rozetler bu birleşik listeden gelir.
-    const allSources: NewsSource[] = [...NEWS_SOURCES, ...customSources]
+    // Gömülü kaynaklar önbellekten gelir: sekmeye dönüşte 0 ms, süresi
+    // geçmişse arka planda tazelenir. persist → soğuk açılışta da anında.
+    const builtin = useCachedResource(NEWS_CACHE_KEY, fetchBuiltinNews, { persist: true })
 
-    useEffect(() => {
-        loadNews()
-    }, [])
+    const [activeFilter, setActiveFilter] = useState<string>('all')
+    const [query, setQuery] = useState('')
+    const debouncedQuery = useDebouncedValue(query)
+    const [pullRefreshing, setPullRefreshing] = useState(false)
 
-    const loadNews = () => {
-        setLoading(true)
-        setError(null)
-        // Özel kaynaklar da akışa karışır — bağımlılık dizisine alınmaz çünkü
-        // sadece ilk yükleme ve yenileme tetikleniyorsa güncel listeden okunur.
-        fetchAllNews(undefined, { sources: allSources })
-            .then(setArticles)
-            .catch((err) => setError(err.message || 'Haberler yüklenemedi'))
-            .finally(() => {
-                setLoading(false)
-                setRefreshing(false)
+    // Haber kategorisindeki özel kaynaklar (diğer kategoriler kendi sekmelerinde)
+    const customNewsSources = useMemo(() => sourcesByCategory('news'), [sourcesByCategory])
+    const allSources: NewsSource[] = useMemo(() => [...NEWS_SOURCES, ...customNewsSources], [customNewsSources])
+
+    // Gömülü + özel kaynak makaleleri tek akış, yeniden eskiye
+    const articles = useMemo(() => {
+        const merged = [...(builtin.data ?? []), ...articlesByCategory('news')]
+        const seen = new Set<string>()
+        return merged
+            .filter((a) => {
+                if (seen.has(a.id)) return false
+                seen.add(a.id)
+                return true
             })
-    }
+            .sort((a, b) => new Date(b.pubDate).getTime() - new Date(a.pubDate).getTime())
+    }, [builtin.data, articlesByCategory])
 
-    const handleRefresh = () => {
-        setRefreshing(true)
-        loadNews()
-    }
+    const filterOptions: FilterOption[] = useMemo(
+        () => [
+            { id: 'all', label: 'Tümü' },
+            ...allSources.map((src) => ({ id: src.id, label: src.label, color: src.color })),
+        ],
+        [allSources],
+    )
 
-    const submitSearch = () => {
-        const q = query.trim()
-        if (q) onSearch(q, 'news')
-    }
+    // Kaynak filtresi + debounce'lu metin araması. Arama artık ayrı bir
+    // ekrana gidip tüm RSS'leri yeniden indirmiyor; eldeki listeyi süzüyor.
+    const visible = useMemo(() => {
+        const bySource = activeFilter === 'all' ? articles : articles.filter((a) => a.source === activeFilter)
+        return filterNews(bySource, debouncedQuery, allSources)
+    }, [articles, activeFilter, debouncedQuery, allSources])
 
-    const filteredArticles = activeFilter === 'all'
-        ? articles
-        : articles.filter((a) => a.source === activeFilter)
+    const searching = debouncedQuery.trim().length > 0
+    const pendingDebounce = query.trim() !== debouncedQuery.trim()
 
-    return (
-        <View style={{ flex: 1, backgroundColor: colors.cream }}>
-            {/* ── Header ── */}
-            <View style={[s.header, { borderBottomColor: colors.border }]}>
-                <View style={s.headerTop}>
-                    <View style={{ flex: 1 }}>
-                        <Text style={[s.headerTitle, { color: colors.ink }]}>Gündem</Text>
-                        <Text style={[s.headerSub, { color: colors.mutedLight }]}>
-                            Türkiye ve dünyadan son haberler
-                        </Text>
-                    </View>
-                    <View style={{ flexDirection: 'row', gap: 8 }}>
-                        {onOpenMenu && <MenuButton onPress={onOpenMenu} colors={colors} />}
-                    </View>
+    const refreshBuiltin = builtin.refresh
+    const handleRefresh = useCallback(async () => {
+        setPullRefreshing(true)
+        try {
+            await Promise.all([refreshBuiltin(), syncSources(customNewsSources.map((src) => src.id))])
+        } finally {
+            setPullRefreshing(false)
+        }
+    }, [refreshBuiltin, syncSources, customNewsSources])
+
+    const renderItem = useCallback(
+        ({ item }: { item: NewsArticle }) => (
+            <NewsCard
+                article={item}
+                srcMeta={getNewsSourceMeta(item.source, allSources)}
+                colors={colors}
+                onOpenUrl={onOpenUrl}
+            />
+        ),
+        [allSources, colors, onOpenUrl],
+    )
+
+    const header = (
+        <View style={[s.header, { borderBottomColor: colors.border }]}>
+            <View style={s.headerTop}>
+                <View style={{ flex: 1 }}>
+                    <Text style={[s.headerTitle, { color: colors.ink }]}>Gündem</Text>
+                    <Text style={[s.headerSub, { color: colors.mutedLight }]}>Türkiye ve dünyadan son haberler</Text>
                 </View>
+                <MenuButton onPress={onOpenMenu} colors={colors} />
+            </View>
 
-                {/* Arama — Gündem sekmesinden erişilebilir */}
-                <View
-                    style={[
-                        s.searchBox,
-                        {
-                            borderColor: focused ? NEWS_RED : colors.inputBorder,
-                            backgroundColor: colors.card,
-                        },
-                    ]}
-                >
-                    <Ionicons
-                        name="search-outline"
-                        size={17}
-                        color={focused ? NEWS_RED : colors.mutedLight}
-                        style={{ marginRight: 8 }}
-                    />
-                    <TextInput
-                        value={query}
-                        onChangeText={setQuery}
-                        onFocus={() => setFocused(true)}
-                        onBlur={() => setFocused(false)}
-                        onSubmitEditing={submitSearch}
-                        returnKeyType="search"
-                        placeholder="Haberlerde ara..."
-                        placeholderTextColor={colors.mutedLight}
-                        style={[s.searchInput, { color: colors.ink }]}
-                    />
-                    {query.length > 0 && (
-                        <Pressable
-                            onPress={() => setQuery('')}
-                            hitSlop={8}
-                            accessibilityLabel="Aramayı temizle"
-                            accessibilityRole="button"
-                        >
-                            <Ionicons name="close-circle" size={17} color={colors.mutedLight} />
-                        </Pressable>
-                    )}
-                </View>
+            <SearchBar
+                value={query}
+                onChangeText={setQuery}
+                placeholder="Haberlerde ara (başlık, özet, kaynak)..."
+                accent={NEWS_RED}
+                colors={colors}
+                busy={pendingDebounce}
+            />
 
-                {/* İlgi alanları — onboarding'de seçilen konular. Boşsa hiç
-                    gösterilmez; seçim varsa tek dokunuşla o konuyu arar. */}
-                {selectedTopics.length > 0 && (
-                    <ScrollView
-                        horizontal
-                        showsHorizontalScrollIndicator={false}
-                        style={{ marginTop: 12 }}
-                        contentContainerStyle={{ paddingRight: 8 }}
-                    >
-                        {selectedTopics.map((topic) => (
-                            <Pressable
-                                key={topic}
-                                onPress={() => onSearch(topic, 'academic')}
-                                accessibilityLabel={`${topic} konusunda akademik makale ara`}
-                                accessibilityRole="button"
-                                style={[s.topicChip, { borderColor: colors.inputBorder }]}
-                            >
-                                <Text style={[s.topicChipText, { color: colors.muted }]}>{topic}</Text>
-                            </Pressable>
-                        ))}
-                    </ScrollView>
-                )}
-
-                {/* Kaynak filtresi */}
+            {/* İlgi alanları — onboarding'de seçilen konular; akademik arama açar */}
+            {query.length === 0 && selectedTopics.length > 0 && (
                 <ScrollView
                     horizontal
                     showsHorizontalScrollIndicator={false}
                     style={{ marginTop: 12 }}
                     contentContainerStyle={{ paddingRight: 8 }}
                 >
-                    <Pressable
-                        onPress={() => setActiveFilter('all')}
-                        style={[
-                            s.filterChip,
-                            activeFilter === 'all'
-                                ? { backgroundColor: NEWS_RED, borderColor: NEWS_RED }
-                                : { backgroundColor: 'transparent', borderColor: colors.inputBorder },
-                        ]}
-                    >
-                        <Text style={[s.filterChipText, { color: activeFilter === 'all' ? '#FFF' : colors.muted }]}>
-                            Tümü
-                        </Text>
-                    </Pressable>
-                    {allSources.map((src) => {
-                        const isActive = activeFilter === src.id
-                        return (
-                            <Pressable
-                                key={src.id}
-                                onPress={() => setActiveFilter(src.id)}
-                                style={[
-                                    s.filterChip,
-                                    isActive
-                                        ? { backgroundColor: src.color, borderColor: src.color }
-                                        : { backgroundColor: 'transparent', borderColor: colors.inputBorder },
-                                ]}
-                            >
-                                <Text style={[s.filterChipText, { color: isActive ? '#FFF' : colors.muted }]}>
-                                    {src.label}
-                                </Text>
-                            </Pressable>
-                        )
-                    })}
-                </ScrollView>
-            </View>
-
-            {/* ── İçerik ── */}
-            {loading && !refreshing ? (
-                <View style={s.centerBox}>
-                    <ActivityIndicator size="large" color={NEWS_RED} />
-                    <Text style={[s.statusText, { color: colors.muted }]}>Haberler yükleniyor...</Text>
-                </View>
-            ) : error ? (
-                <View style={s.centerBox}>
-                    <Ionicons name="cloud-offline-outline" size={36} color={colors.mutedLight} />
-                    <Text style={[s.statusText, { color: colors.ink }]}>Haberler yüklenemedi</Text>
-                    <Text style={[s.statusSubText, { color: colors.muted }]}>{error}</Text>
-                    <Pressable onPress={loadNews} style={[s.retryBtn, { backgroundColor: NEWS_RED }]}>
-                        <Text style={s.retryBtnText}>Tekrar dene</Text>
-                    </Pressable>
-                </View>
-            ) : (
-                <ScrollView
-                    style={{ flex: 1 }}
-                    contentContainerStyle={{ padding: 16, paddingBottom: BOTTOM_SPACE }}
-                    refreshControl={
-                        <RefreshControl
-                            refreshing={refreshing}
-                            onRefresh={handleRefresh}
-                            colors={[NEWS_RED]}
-                            tintColor={NEWS_RED}
-                        />
-                    }
-                >
-                    <Text style={[s.resultCount, { color: colors.mutedLight }]}>
-                        {filteredArticles.length === 1 ? '1 haber' : `${filteredArticles.length} haber`}
-                    </Text>
-
-                    {filteredArticles.map((article) => {
-                        // Kullanıcının eklediği özel kaynaklarda varsayılan
-                        // metaya düşüş gerekir; getNewsSourceMeta artık
-                        // bilinmeyen id için undefined döndürüyor.
-                        const srcMeta = getNewsSourceMeta(article.source, allSources)
-                        const sourceColor = srcMeta?.color ?? FALLBACK_SOURCE_META.color
-                        const alreadySaved = isDownloaded(article.id)
-                        const downloading = downloadingId === article.id
-                        return (
-                            <Pressable
-                                key={article.id}
-                                onPress={() => onOpenUrl(article.link, article.title)}
-                                style={({ pressed }) => [
-                                    s.card,
-                                    {
-                                        backgroundColor: pressed ? colors.pressedCard : colors.card,
-                                        borderColor: colors.border,
-                                    },
-                                ]}
-                            >
-                                {/* Kaynak şeridi — kartın solunda kaynak rengi */}
-                                <View style={[s.accent, { backgroundColor: sourceColor }]} />
-
-                                <View style={s.cardInner}>
-                                    <View style={s.cardHeader}>
-                                        <Text style={[s.sourceText, { color: sourceColor }]}>
-                                            {srcMeta?.label ?? article.source}
-                                        </Text>
-                                        <Text style={[s.timeText, { color: colors.mutedLight }]}>
-                                            {formatNewsDate(article.pubDate)}
-                                        </Text>
-                                    </View>
-
-                                    <Text style={[s.cardTitle, { color: colors.ink }]} numberOfLines={3}>
-                                        {article.title}
-                                    </Text>
-
-                                    {article.description ? (
-                                        <Text style={[s.cardDesc, { color: colors.cardAbstract }]} numberOfLines={2}>
-                                            {article.description}
-                                        </Text>
-                                    ) : null}
-
-                                    <View style={s.cardFooter}>
-                                        {article.category ? (
-                                            <Text style={[s.categoryText, { color: colors.mutedLight }]}>
-                                                {article.category}
-                                            </Text>
-                                        ) : <View />}
-
-                                        <Pressable
-                                            onPress={(e) => {
-                                                e.stopPropagation?.()
-                                                if (downloading || alreadySaved) return
-                                                setDownloadingId(article.id)
-                                                downloadArticle({
-                                                    id: article.id,
-                                                    source: article.source,
-                                                    title: article.title,
-                                                    description: article.description,
-                                                    link: article.link,
-                                                    imageUrl: article.imageUrl,
-                                                })
-                                                    .catch((err) => Alert.alert('İndirilemedi', err.message || 'Bir hata oluştu.'))
-                                                    .finally(() => setDownloadingId(null))
-                                            }}
-                                            hitSlop={10}
-                                            disabled={downloading}
-                                            accessibilityLabel={
-                                                alreadySaved ? 'İndirildi' : downloading ? 'İndiriliyor' : 'Çevrimdışı için indir'
-                                            }
-                                            accessibilityRole="button"
-                                            style={s.saveBtn}
-                                        >
-                                            <Ionicons
-                                                name={alreadySaved ? 'checkmark-circle' : downloading ? 'ellipsis-horizontal' : 'download-outline'}
-                                                size={17}
-                                                color={alreadySaved ? NEWS_RED : downloading ? colors.mutedLight : colors.muted}
-                                            />
-                                        </Pressable>
-                                    </View>
-                                </View>
-                            </Pressable>
-                        )
-                    })}
-
-                    {filteredArticles.length === 0 && (
-                        <View style={s.emptyBox}>
-                            <Ionicons name="newspaper-outline" size={34} color={colors.mutedLight} />
-                            <Text style={[s.statusText, { color: colors.ink }]}>Haber bulunamadı</Text>
-                            <Text style={[s.statusSubText, { color: colors.muted }]}>
-                                Başka bir kaynak seçmeyi dene.
-                            </Text>
-                        </View>
-                    )}
+                    {selectedTopics.map((topic) => (
+                        <Pressable
+                            key={topic}
+                            onPress={() => onSearch(topic, 'academic')}
+                            accessibilityLabel={`${topic} konusunda akademik makale ara`}
+                            accessibilityRole="button"
+                            style={[s.topicChip, { borderColor: colors.inputBorder }]}
+                        >
+                            <Text style={[s.topicChipText, { color: colors.muted }]}>{topic}</Text>
+                        </Pressable>
+                    ))}
                 </ScrollView>
             )}
+
+            <FilterChips
+                options={filterOptions}
+                value={activeFilter}
+                onChange={setActiveFilter}
+                accent={NEWS_RED}
+                colors={colors}
+            />
+        </View>
+    )
+
+    let body
+    if (builtin.loading && articles.length === 0) {
+        body = <SkeletonList colors={colors} />
+    } else if (builtin.error && articles.length === 0) {
+        body = (
+            <EmptyState
+                icon="cloud-offline-outline"
+                title="Haberler yüklenemedi"
+                subtitle={builtin.error}
+                actionLabel="Tekrar dene"
+                onAction={refreshBuiltin}
+                accent={NEWS_RED}
+                colors={colors}
+            />
+        )
+    } else {
+        body = (
+            <FlatList
+                data={visible}
+                keyExtractor={(a) => a.id}
+                renderItem={renderItem}
+                style={{ flex: 1 }}
+                contentContainerStyle={{ padding: 16, paddingBottom: BOTTOM_SPACE }}
+                keyboardShouldPersistTaps="handled"
+                keyboardDismissMode="on-drag"
+                initialNumToRender={8}
+                maxToRenderPerBatch={8}
+                windowSize={7}
+                ListHeaderComponent={
+                    <Text style={[s.resultCount, { color: colors.mutedLight }]}>
+                        {searching
+                            ? `"${debouncedQuery.trim()}" için ${visible.length} sonuç`
+                            : `${visible.length} haber`}
+                    </Text>
+                }
+                ListEmptyComponent={
+                    searching ? (
+                        <EmptyState
+                            icon="search-outline"
+                            title="Sonuç bulunamadı"
+                            subtitle={`"${debouncedQuery.trim()}" ile eşleşen haber yok. Farklı bir kelime dene ya da kaynak filtresini "Tümü" yap.`}
+                            actionLabel="Aramayı temizle"
+                            onAction={() => setQuery('')}
+                            accent={NEWS_RED}
+                            colors={colors}
+                        />
+                    ) : (
+                        <EmptyState
+                            icon="newspaper-outline"
+                            title="Haber bulunamadı"
+                            subtitle="Başka bir kaynak seçmeyi dene."
+                            accent={NEWS_RED}
+                            colors={colors}
+                        />
+                    )
+                }
+                refreshControl={
+                    <RefreshControl
+                        refreshing={pullRefreshing}
+                        onRefresh={handleRefresh}
+                        colors={[NEWS_RED]}
+                        tintColor={NEWS_RED}
+                    />
+                }
+            />
+        )
+    }
+
+    return (
+        <View style={{ flex: 1, backgroundColor: colors.cream }}>
+            {header}
+            {body}
         </View>
     )
 }
+
+export default memo(NewsScreen)
 
 const s = StyleSheet.create({
     header: {

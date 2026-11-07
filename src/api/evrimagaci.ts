@@ -18,6 +18,9 @@ const RSS_URL = 'https://evrimagaci.org/rss.xml'
 
 // ── XML yardımcıları (news.ts ile ortak) ────────────────────────────────────
 import { extractTag, extractAttribute, stripHtml } from './rss'
+import { searchItems } from '../utils/search'
+
+export const EVRIM_CACHE_KEY = 'evrim:feed'
 
 // ── Parse RSS XML ───────────────────────────────────────────────────────────
 
@@ -86,16 +89,13 @@ export async function fetchEvrimAgaciArticles(): Promise<EvrimAgaciArticle[]> {
 
 // ── Search/filter articles by keyword ───────────────────────────────────────
 
+export function filterEvrim(articles: EvrimAgaciArticle[], query: string): EvrimAgaciArticle[] {
+    return searchItems(articles, query, (a) => [a.title, a.description, a.category])
+}
+
 export async function searchEvrimAgaci(query: string): Promise<EvrimAgaciArticle[]> {
     const articles = await fetchEvrimAgaciArticles()
-    const lowerQuery = query.toLowerCase()
-
-    return articles.filter(
-        (a) =>
-            a.title.toLowerCase().includes(lowerQuery) ||
-            a.description.toLowerCase().includes(lowerQuery) ||
-            a.category.toLowerCase().includes(lowerQuery),
-    )
+    return filterEvrim(articles, query)
 }
 
 // ── Format date for display ─────────────────────────────────────────────────

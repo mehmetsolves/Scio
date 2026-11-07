@@ -3,7 +3,8 @@ import { View, Text, ScrollView, Pressable, StyleSheet, Alert } from 'react-nati
 
 import Ionicons from '@expo/vector-icons/Ionicons'
 import { useSavedArticles, type ReadingStatus, type SavedArticleEntry, type SavedHNEntry, type SavedEvrimEntry } from '../store/SavedArticlesContext'
-import { useDownloads, type DownloadedArticle } from '../store/DownloadsContext'
+import { useDownloads, translatedLangOf, type DownloadedArticle } from '../store/DownloadsContext'
+import { getLanguage } from '../api/languages'
 import type { ColorScheme } from '../theme/colors'
 import type { Article } from '../api/client'
 import { extractDomain, timeAgo, type HNItem } from '../api/hn'
@@ -141,8 +142,11 @@ export default function SavedScreen({
     onHNItem,
     onOpenUrl,
     onOfflineArticle,
+    onBack,
 }: {
     colors: ColorScheme
+    // Menünün açıldığı ekrana döner (App.tsx handleBack)
+    onBack: () => void
     onArticle: (a: Article) => void
     onHNItem: (item: HNItem) => void
     onOpenUrl?: (url: string, title: string) => void
@@ -195,6 +199,15 @@ export default function SavedScreen({
         <View style={{ flex: 1, backgroundColor: colors.cream }}>
             {/* Header */}
             <View style={s.header}>
+                <Pressable
+                    onPress={onBack}
+                    hitSlop={10}
+                    accessibilityLabel="Geri"
+                    accessibilityRole="button"
+                    style={s.backBtn}
+                >
+                    <Ionicons name="arrow-back" size={20} color={colors.ink} />
+                </Pressable>
                 <Text style={[s.screenTitle, { color: colors.ink }]}>Kaydedilenler</Text>
             </View>
 
@@ -302,7 +315,7 @@ export default function SavedScreen({
                                         <View style={[s.row, { marginTop: 4 }]}>
                                             <Ionicons name="globe-outline" size={12} color={colors.mutedLight} />
                                             <Text style={[s.metaText, { color: colors.mutedLight }]}>
-                                                {entry.origLang === 'tr' ? 'Türkçe' : 'İngilizce'}
+                                                {getLanguage(entry.origLang).label} → {getLanguage(translatedLangOf(entry)).label}
                                             </Text>
                                             <Text style={[s.metaDot, { color: colors.inputBorder }]}>·</Text>
                                             <Text style={[s.metaText, { color: colors.mutedLight }]}>
@@ -474,9 +487,15 @@ export default function SavedScreen({
 
 const s = StyleSheet.create({
     header: {
-        paddingHorizontal: 24,
+        paddingHorizontal: 20,
         paddingTop: 20,
         paddingBottom: 8,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
+    },
+    backBtn: {
+        padding: 4,
     },
     screenTitle: {
         fontFamily: SERIF_BOLD,

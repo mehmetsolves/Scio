@@ -15,6 +15,10 @@ import type { ColorScheme } from '../theme/colors'
 import { extractDomain, type HNItem } from '../api/hn'
 import { useSavedArticles } from '../store/SavedArticlesContext'
 import { useDownloads } from '../store/DownloadsContext'
+import { useSettings } from '../store/SettingsContext'
+import { useContentTranslation } from '../hooks/useContentTranslation'
+import { googleTranslateUrl } from '../utils/translateUrl'
+import LanguageToggle from '../components/LanguageToggle'
 
 // ─── Font constants ──────────────────────────────────────────────────────────
 
@@ -43,9 +47,6 @@ function stripTags(html: string): string {
         .trim()
 }
 
-function getTranslateUrl(url: string): string {
-    return `https://translate.google.com/translate?sl=auto&tl=tr&u=${encodeURIComponent(url)}`
-}
 
 // ─── Main Reader Screen ─────────────────────────────────────────────────────
 
@@ -62,9 +63,13 @@ export default function HNReaderScreen({
     const { downloadArticle, isDownloaded } = useDownloads()
     const [downloading, setDownloading] = useState(false)
     const [loading, setLoading] = useState(true)
+    // Bağlantılı gönderide sayfa Google çeviri proxy'si ile, metin
+    // gönderisinde (Ask HN vb.) başlık+metin çeviri servisiyle çevrilir.
+    // Her iki durumda da hedef dil global targetLanguage.
+    const { targetLanguage } = useSettings()
     const [translated, setTranslated] = useState(false)
     const domain = extractDomain(item.url)
-    const isTextPost = !item.url && item.text
+    const isTextPost = !item.url && !!item.text
     const dlId = `hn-${item.id}`
     const canDownload = !!item.url
 
@@ -77,8 +82,15 @@ export default function HNReaderScreen({
     })
 
     const currentUrl = item.url
-        ? (translated ? getTranslateUrl(item.url) : item.url)
+        ? (translated ? googleTranslateUrl(item.url, targetLanguage) : item.url)
         : null
+
+    const textTr = useContentTranslation(
+        `hn-${item.id}`,
+        { title: item.title, body: isTextPost ? stripTags(item.text!) : '' },
+        { sourceLang: 'en', auto: false },
+    )
+    const showTitle = isTextPost ? textTr.shown.title : item.title
 
     return (
         <View style={{ flex: 1, backgroundColor: colors.cream }}>
@@ -159,7 +171,7 @@ export default function HNReaderScreen({
 
             {/* Article Meta */}
             <View style={[s.metaBox, { borderBottomColor: colors.border }]}>
-                <Text style={[s.articleTitle, { color: colors.ink }]}>{item.title}</Text>
+                <Text style={[s.articleTitle, { color: colors.ink }]}>{showTitle}</Text>
                 <View style={s.metaRow}>
                     <Ionicons name="caret-up" size={13} color={HN_ORANGE} />
                     <Text style={[s.metaText, { color: HN_ORANGE }]}>{item.score}</Text>
@@ -175,8 +187,11 @@ export default function HNReaderScreen({
             {/* Content */}
             {isTextPost ? (
                 <ScrollView style={{ flex: 1 }} contentContainerStyle={s.textBody}>
+                    {textTr.error ? (
+                        <Text style={[s.metaText, { color: '#C0392B', marginBottom: 12 }]}>Çeviri hatası: {textTr.error}</Text>
+                    ) : null}
                     <Text style={[s.bodyText, { color: colors.ink }]}>
-                        {stripTags(item.text!)}
+                        {textTr.shown.body}
                     </Text>
                 </ScrollView>
             ) : currentUrl ? (
@@ -205,20 +220,21 @@ export default function HNReaderScreen({
                 </View>
             )}
 
-            {/* Language Toggle FAB */}
-            {(item.url || isTextPost) && (
-                <Pressable
+            {/* Language Toggle FAB — ortak bileşen, etiket global targetLanguage */}
+            {(item.url || isTextPost) && targetLanguage !== 'en' && (
+                <LanguageToggle
+                    showingTranslation={isTextPost ? textTr.isTranslated : translated}
+                    targetLanguage={targetLanguage}
+                    busy={isTextPost && !!textTr.translatingLang}
                     onPress={() => {
-                        setTranslated((v) => !v)
-                        if (item.url) setLoading(true)
+                        if (isTextPost) {
+                            textTr.toggle()
+                        } else {
+                            setTranslated((v) => !v)
+                            setLoading(true)
+                        }
                     }}
-                    accessibilityLabel={translated ? 'Orijinal dili göster' : 'Türkçeye çevir'}
-                    accessibilityRole="button"
-                    style={s.langToggle}
-                >
-                    <Text style={{ fontSize: 14 }}>{translated ? '🇬🇧' : '🇹🇷'}</Text>
-                    <Text style={s.langToggleText}>{translated ? 'Orijinal' : 'Türkçe'}</Text>
-                </Pressable>
+                />
             )}
         </View>
     )

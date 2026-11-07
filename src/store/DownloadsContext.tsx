@@ -18,6 +18,10 @@ export interface DownloadedArticle {
     descriptionTr: string
     body: string
     bodyTr: string
+    // *Tr alanlarının gerçekte hangi dilde olduğu. (Alan adları geriye dönük
+    // uyumluluk için "Tr" kaldı.) Eski kayıtlarda yok → origLang 'tr' ise
+    // 'en', değilse 'tr' kabul edilir; bkz. translatedLangOf.
+    translatedLang?: string
     imageUrl?: string
     link: string
     savedAt: number
@@ -84,6 +88,10 @@ export function useDownloads(): DownloadsContextValue {
     return ctx
 }
 
+export function translatedLangOf(a: DownloadedArticle): string {
+    return a.translatedLang ?? (a.origLang === 'tr' ? 'en' : 'tr')
+}
+
 // Detect direction: prefer a Turkish-language source, else use extraction result.
 function detectOrigLang(source: string, extracted?: ExtractedArticle): DownloadLang {
     if (extracted?.contentLanguage) return extracted.contentLanguage
@@ -103,7 +111,7 @@ function chunkText(text: string, size = 1000): string[] {
 export function DownloadsProvider({ children }: { children: ReactNode }) {
     const [downloaded, setDownloaded] = useState<DownloadedArticle[]>([])
     const [ready, setReady] = useState(false)
-    const { engine, style, apiKey } = useSettings()
+    const { engine, style, apiKey, targetLanguage } = useSettings()
 
     // ── Load on mount ──
     useEffect(() => {
@@ -152,7 +160,7 @@ export function DownloadsProvider({ children }: { children: ReactNode }) {
 
     const translateTo = async (
         text: string,
-        opts: { style: TranslationStyle; engine: Engine; apiKey?: string; sourceLang: DownloadLang; targetLang: DownloadLang },
+        opts: { style: TranslationStyle; engine: Engine; apiKey?: string; sourceLang: string; targetLang: string },
     ): Promise<string> => {
         // For short text send it whole; for long bodies chunk to stay under API limits.
         if (text.length <= 1500) {
@@ -162,15 +170,20 @@ export function DownloadsProvider({ children }: { children: ReactNode }) {
                 return text
             }
         }
+        // Sıralı: paralel 30 istek ücretsiz motorun hız sınırına takılıyordu ve
+        // başarısız parçalar sessizce düşüp metinde boşluk bırakıyordu. Bir
+        // parça başarısız olursa kalan kısım orijinal hâliyle eklenir.
         const chunks = chunkText(text)
-        const results = await Promise.allSettled(
-            chunks.map((chunk) => translateText(chunk, opts)),
-        )
-        return results
-            .filter((r): r is PromiseFulfilledResult<string> => r.status === 'fulfilled')
-            .map((r) => r.value)
-            .join(' ')
-            .trim()
+        const out: string[] = []
+        for (let i = 0; i < chunks.length; i++) {
+            try {
+                out.push(await translateText(chunks[i], opts))
+            } catch {
+                out.push(chunks.slice(i).join(''))
+                break
+            }
+        }
+        return out.join(' ').trim()
     }
 
     const downloadArticle = async (meta: DownloadMeta) => {
@@ -178,7 +191,10 @@ export function DownloadsProvider({ children }: { children: ReactNode }) {
         const extracted = await extractArticle(meta.link, meta.source)
 
         const origLang = detectOrigLang(meta.source, extracted)
-        const targetLang: DownloadLang = origLang === 'tr' ? 'en' : 'tr'
+        // Hedef: global targetLanguage. Makale zaten o dildeyse karşı dile
+        // (tr ↔ en) çevrilir ki "çeviri" düğmesi yine işe yarasın.
+        const targetLang =
+            targetLanguage !== origLang ? targetLanguage : origLang === 'tr' ? 'en' : 'tr'
 
         const title = extracted?.title?.trim() || meta.title || ''
         const description = extracted?.description?.trim() || meta.description || ''
@@ -203,6 +219,7 @@ export function DownloadsProvider({ children }: { children: ReactNode }) {
             descriptionTr: descriptionTr || description,
             body,
             bodyTr: bodyTr || body,
+            translatedLang: targetLang,
             imageUrl: extracted?.imageUrl || meta.imageUrl,
             link: meta.link,
             savedAt: Date.now(),

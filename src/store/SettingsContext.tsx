@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect, type ReactNode } from 'react'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import * as SecureStore from 'expo-secure-store'
+import { DEFAULT_TRANSLATION_LANGS, LANGUAGES } from '../api/languages'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -18,6 +19,13 @@ interface SettingsState {
     selectedTopics: string[]
     hasCompletedOnboarding: boolean
     hiddenTabs: CategoryId[] // Ayarlar'dan kapatılan alt bar sekmeleri
+    // Kullanıcının eklediği çeviri dilleri; ilki varsayılan (makale açılınca
+    // otomatik bu dile çevrilir). En az bir dil kalır.
+    translationLangs: string[]
+    // Tek doğruluk kaynağı: uygulamanın her yerindeki hedef çeviri dili.
+    // translationLangs[0]'dan türetilir; ayrı state DEĞİL, böylece iki değer
+    // asla birbirinden kopamaz. AsyncStorage'da translationLangs ile saklanır.
+    targetLanguage: string
     ready: boolean // true once persisted values are loaded
 }
 
@@ -30,6 +38,11 @@ interface SettingsActions {
     setSelectedTopics: (topics: string[]) => void
     completeOnboarding: () => void
     toggleTab: (t: CategoryId) => void
+    addTranslationLang: (code: string) => void
+    removeTranslationLang: (code: string) => void
+    setDefaultTranslationLang: (code: string) => void
+    // setDefaultTranslationLang ile aynı; dil listede yoksa önce ekler
+    setTargetLanguage: (code: string) => void
 }
 
 type SettingsContextValue = SettingsState & SettingsActions
@@ -93,6 +106,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     const [selectedTopics, setSelectedTopicsState] = useState<string[]>([])
     const [hasCompletedOnboarding, setHasCompletedOnboardingState] = useState(false)
     const [hiddenTabs, setHiddenTabs] = useState<CategoryId[]>([])
+    const [translationLangs, setTranslationLangs] = useState<string[]>(DEFAULT_TRANSLATION_LANGS)
     const [ready, setReady] = useState(false)
 
     // ── Load persisted values on mount ──
@@ -110,6 +124,12 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
                     if (Array.isArray(parsed.selectedTopics)) setSelectedTopicsState(parsed.selectedTopics)
                     if (typeof parsed.hasCompletedOnboarding === 'boolean') setHasCompletedOnboardingState(parsed.hasCompletedOnboarding)
                     if (Array.isArray(parsed.hiddenTabs)) setHiddenTabs(parsed.hiddenTabs)
+                    if (Array.isArray(parsed.translationLangs)) {
+                        const known = parsed.translationLangs.filter((c: unknown) =>
+                            LANGUAGES.some((l) => l.code === c),
+                        )
+                        if (known.length > 0) setTranslationLangs(known)
+                    }
                 }
                 const storedKey = await SecureStore.getItemAsync(SECURE_KEY)
                 if (storedKey) setApiKeyState(storedKey)
@@ -201,6 +221,36 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         })
     }
 
+    const addTranslationLang = (code: string) => {
+        setTranslationLangs((prev) => {
+            if (prev.includes(code)) return prev
+            const next = [...prev, code]
+            persist({ translationLangs: next })
+            return next
+        })
+    }
+
+    const removeTranslationLang = (code: string) => {
+        setTranslationLangs((prev) => {
+            if (prev.length <= 1 || !prev.includes(code)) return prev
+            const next = prev.filter((c) => c !== code)
+            persist({ translationLangs: next })
+            return next
+        })
+    }
+
+    // Varsayılan = listenin başı
+    const setDefaultTranslationLang = (code: string) => {
+        setTranslationLangs((prev) => {
+            const next = [code, ...prev.filter((c) => c !== code)]
+            persist({ translationLangs: next })
+            return next
+        })
+    }
+
+    const setTargetLanguage = (code: string) => setDefaultTranslationLang(code)
+    const targetLanguage = translationLangs[0] ?? DEFAULT_TRANSLATION_LANGS[0]
+
     return (
         <SettingsContext.Provider
             value={{
@@ -212,6 +262,8 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
                 selectedTopics,
                 hasCompletedOnboarding,
                 hiddenTabs,
+                translationLangs,
+                targetLanguage,
                 ready,
                 toggleSource,
                 setDarkMode,
@@ -221,6 +273,10 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
                 setSelectedTopics,
                 completeOnboarding,
                 toggleTab,
+                addTranslationLang,
+                removeTranslationLang,
+                setDefaultTranslationLang,
+                setTargetLanguage,
             }}
         >
             {children}

@@ -1,8 +1,7 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { memo, useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import {
     View,
     Text,
-    TextInput,
     Pressable,
     ScrollView,
     StyleSheet,
@@ -14,6 +13,11 @@ import Ionicons from '@expo/vector-icons/Ionicons'
 import { MenuButton } from './HamburgerMenu'
 import type { ColorScheme } from '../theme/colors'
 import { useDownloads } from '../store/DownloadsContext'
+import { useCustomSources } from '../store/CustomSourcesContext'
+import { filterNews, formatNewsDate, type NewsArticle } from '../api/news'
+import { useDebouncedValue } from '../hooks/useDebouncedValue'
+import SearchBar from '../components/SearchBar'
+import { EmptyState } from '../components/ListStates'
 import {
     fetchStoryIds,
     fetchItems,
@@ -43,6 +47,14 @@ const HN_ORANGE = '#E65100'
 // boyamadan sonra arka planda partiler hâlinde ekleniyor.
 const FIRST_BATCH = 15
 const NEXT_BATCH = 10
+
+// Akış önbelleği (stale-while-revalidate). Sekmeye dönüşte liste anında
+// görünür; 5 dakikadan eskiyse arka planda sessizce tazelenir.
+const HN_TTL = 5 * 60 * 1000
+const hnCache = new Map<HNFeed, { items: HNItem[]; time: number }>()
+
+// "Kaynaklarım": Teknoloji kategorisinde eklenmiş özel kaynaklar
+type FeedKey = HNFeed | 'custom'
 
 // ─── Date Filter Labels ─────────────────────────────────────────────────────
 
@@ -177,16 +189,21 @@ function HNCard({
 
 // ─── Main HN Screen ─────────────────────────────────────────────────────────
 
-export default function HNScreen({
+function HNScreen({
     colors,
     onItem,
     onOpenMenu,
+    onOpenUrl,
 }: {
     colors: ColorScheme
     onItem: (item: HNItem) => void
     onOpenMenu?: () => void
+    onOpenUrl?: (url: string, title: string) => void
 }) {
-    const [feed, setFeed] = useState<HNFeed>('top')
+    const [feed, setFeed] = useState<FeedKey>('top')
+    const { sourcesByCategory, articlesByCategory, syncSources } = useCustomSources()
+    const techSources = useMemo(() => sourcesByCategory('tech'), [sourcesByCategory])
+    const techArticles = useMemo(() => articlesByCategory('tech'), [articlesByCategory])
     const [dateFilter, setDateFilter] = useState<DateFilter>('all')
     const [showDatePicker, setShowDatePicker] = useState(false)
     const [allIds, setAllIds] = useState<number[]>([])
@@ -194,7 +211,9 @@ export default function HNScreen({
     const [loading, setLoading] = useState(true)
     const [refreshing, setRefreshing] = useState(false)
     const [searchQuery, setSearchQuery] = useState('')
-    const [searchFocused, setSearchFocused] = useState(false)
+    const debouncedQuery = useDebouncedValue(searchQuery)
+    const itemsRef = useRef<HNItem[]>([])
+    itemsRef.current = items
 
     // Ardışık append'ler aynı öğeyi tekrar ekleyebiliyordu (React'a
     // "Encountered two children with the same key" hatası bastıran sebepti).
@@ -214,7 +233,15 @@ export default function HNScreen({
     }, [])
 
     const loadFeed = useCallback(async (selectedFeed: HNFeed, isRefresh = false) => {
-        if (isRefresh) setRefreshing(true)
+        const cached = hnCache.get(selectedFeed)
+        if (!isRefresh && cached) {
+            // Önbellekteki listeyi hemen göster
+            setItems(cached.items)
+            setLoading(false)
+            if (Date.now() - cached.time < HN_TTL) return
+            // Eskimiş: arka planda tazele, kullanıcı listeyi görmeye devam etsin
+            setRefreshing(true)
+        } else if (isRefresh) setRefreshing(true)
         else setLoading(true)
 
         try {
@@ -238,8 +265,10 @@ export default function HNScreen({
             if (rest.length > 0) {
                 await fetchItemsProgressive(rest, appendItems, NEXT_BATCH)
             }
+            // Son durumu önbelleğe yaz (bir sonraki render'dan sonra güncel)
+            setTimeout(() => hnCache.set(selectedFeed, { items: itemsRef.current, time: Date.now() }), 0)
         } catch {
-            setItems([])
+            if (!hnCache.get(selectedFeed)) setItems([])
         } finally {
             setLoading(false)
             setRefreshing(false)
@@ -247,8 +276,27 @@ export default function HNScreen({
     }, [appendItems])
 
     useEffect(() => {
-        loadFeed(feed)
+        if (feed !== 'custom') loadFeed(feed)
     }, [feed])
+
+    const refreshCurrent = useCallback(() => {
+        if (feed === 'custom') {
+            setRefreshing(true)
+            syncSources(techSources.map((src) => src.id)).finally(() => setRefreshing(false))
+        } else {
+            loadFeed(feed, true)
+        }
+    }, [feed, loadFeed, syncSources, techSources])
+
+    // Özel teknoloji kaynakları — debounce'lu arama
+    const customVisible = useMemo(
+        () => (feed === 'custom' ? filterNews(techArticles, debouncedQuery, techSources) : []),
+        [feed, techArticles, debouncedQuery, techSources],
+    )
+    const sourceLabel = useMemo(() => {
+        const map = new Map(techSources.map((src) => [src.id, src.label]))
+        return (id: string) => map.get(id) ?? id
+    }, [techSources])
 
     // Açtıktan hemen sonra filtrelenecek Türkçe sorgular çok sonuç bulmayıp
     // görüneni boşaltabilir. Sorgu uzunluğuna göre aramayı yapmaya devam et.
@@ -258,18 +306,20 @@ export default function HNScreen({
     // sokabiliyordu.
     const displayItems = useMemo(() => {
         const seen = new Set<number>()
-        return filterByDate(filterHN(items, searchQuery), dateFilter).filter((item) => {
+        return filterByDate(filterHN(items, debouncedQuery), dateFilter).filter((item) => {
             if (seen.has(item.id)) return false
             seen.add(item.id)
             return true
         })
-    }, [items, searchQuery, dateFilter])
+    }, [items, debouncedQuery, dateFilter])
 
-    const FEED_TABS: { key: HNFeed; label: string }[] = [
+    const FEED_TABS: { key: FeedKey; label: string }[] = [
         { key: 'top', label: 'En İyi' },
         { key: 'new', label: 'Yeni' },
         { key: 'best', label: 'Seçkin' },
+        ...(techSources.length > 0 ? [{ key: 'custom' as const, label: 'Kaynaklarım' }] : []),
     ]
+    const searchingNow = debouncedQuery.trim().length > 0
 
     const dateLabel = DATE_LABELS.find((d) => d.key === dateFilter)?.label ?? 'Tümü'
 
@@ -293,7 +343,7 @@ export default function HNScreen({
                         <Ionicons name={showDatePicker ? 'chevron-up' : 'chevron-down'} size={12} color={colors.mutedLight} />
                     </Pressable>
                     <Pressable
-                        onPress={() => loadFeed(feed, true)}
+                        onPress={refreshCurrent}
                         hitSlop={6}
                         accessibilityLabel="Akışı yenile"
                         accessibilityRole="button"
@@ -359,48 +409,64 @@ export default function HNScreen({
                 ))}
             </View>
 
-            {/* Arama — yerel başlık/domain filtresi (HN API arama sunmuyor) */}
-            <View
-                style={[
-                    s.searchBox,
-                    {
-                        borderColor: searchFocused ? HN_ORANGE : colors.inputBorder,
-                        backgroundColor: colors.card,
-                    },
-                ]}
-            >
-                <Ionicons
-                    name="search-outline"
-                    size={16}
-                    color={searchFocused ? HN_ORANGE : colors.mutedLight}
-                    style={{ marginRight: 8 }}
-                />
-                <TextInput
+            {/* Arama — yerel başlık/domain/yazar filtresi (HN API arama sunmuyor) */}
+            <View style={{ paddingHorizontal: 16 }}>
+                <SearchBar
                     value={searchQuery}
                     onChangeText={setSearchQuery}
-                    onFocus={() => setSearchFocused(true)}
-                    onBlur={() => setSearchFocused(false)}
-                    placeholder="Başlık veya site ara..."
-                    placeholderTextColor={colors.mutedLight}
-                    returnKeyType="search"
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                    style={[s.searchInput, { color: colors.ink }]}
+                    placeholder={feed === 'custom' ? 'Kaynaklarımda ara...' : 'Başlık, site veya yazar ara...'}
+                    accent={HN_ORANGE}
+                    colors={colors}
+                    busy={searchQuery.trim() !== debouncedQuery.trim()}
+                    style={{ marginTop: 10 }}
                 />
-                {searchQuery.length > 0 && (
-                    <Pressable
-                        onPress={() => setSearchQuery('')}
-                        hitSlop={8}
-                        accessibilityLabel="Aramayı temizle"
-                        accessibilityRole="button"
-                    >
-                        <Ionicons name="close-circle" size={16} color={colors.mutedLight} />
-                    </Pressable>
-                )}
             </View>
 
             {/* Content */}
-            {loading ? (
+            {feed === 'custom' ? (
+                <ScrollView
+                    style={{ flex: 1 }}
+                    contentContainerStyle={{ padding: 16, paddingBottom: 28 }}
+                    keyboardShouldPersistTaps="handled"
+                    keyboardDismissMode="on-drag"
+                    refreshControl={
+                        <RefreshControl refreshing={refreshing} onRefresh={refreshCurrent} tintColor={HN_ORANGE} />
+                    }
+                >
+                    {customVisible.length === 0 ? (
+                        <EmptyState
+                            icon="search-outline"
+                            title={searchingNow ? 'Sonuç bulunamadı' : 'Bu kaynaklarda içerik yok'}
+                            subtitle={searchingNow ? `"${debouncedQuery.trim()}" ile eşleşen içerik yok.` : 'Aşağı çekerek yenileyebilirsin.'}
+                            actionLabel={searchingNow ? 'Aramayı temizle' : undefined}
+                            onAction={searchingNow ? () => setSearchQuery('') : undefined}
+                            accent={HN_ORANGE}
+                            colors={colors}
+                        />
+                    ) : (
+                        customVisible.map((a: NewsArticle) => (
+                            <Pressable
+                                key={a.id}
+                                onPress={() => onOpenUrl?.(a.link, a.title)}
+                                style={({ pressed }) => [
+                                    s.card,
+                                    { backgroundColor: pressed ? colors.pressedCard : colors.card, borderColor: colors.border },
+                                ]}
+                            >
+                                <Text style={[s.metaDomain, { color: HN_ORANGE, marginBottom: 6 }]} numberOfLines={1}>
+                                    {sourceLabel(a.source)} · {formatNewsDate(a.pubDate)}
+                                </Text>
+                                <Text style={[s.cardTitle, { color: colors.ink }]}>{a.title}</Text>
+                                {a.description ? (
+                                    <Text style={[s.metaText, { color: colors.mutedLight, marginTop: 6 }]} numberOfLines={2}>
+                                        {a.description}
+                                    </Text>
+                                ) : null}
+                            </Pressable>
+                        ))
+                    )}
+                </ScrollView>
+            ) : loading ? (
                 <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 28 }}>
                     {Array.from({ length: 6 }).map((_, i) => (
                         <SkeletonCard key={i} colors={colors} />
@@ -410,23 +476,30 @@ export default function HNScreen({
                 <ScrollView
                     style={{ flex: 1 }}
                     contentContainerStyle={{ padding: 16, paddingBottom: 28 }}
+                    keyboardShouldPersistTaps="handled"
+                    keyboardDismissMode="on-drag"
                     refreshControl={
                         <RefreshControl
                             refreshing={refreshing}
-                            onRefresh={() => loadFeed(feed, true)}
+                            onRefresh={refreshCurrent}
                             tintColor={HN_ORANGE}
                         />
                     }
                 >
                     {displayItems.length === 0 ? (
-                        <View style={s.emptyBox}>
-                            <Ionicons name="hourglass-outline" size={32} color={colors.mutedLight} />
-                            <Text style={[s.emptyText, { color: colors.muted }]}>
-                                {searchQuery.trim()
-                                    ? `"${searchQuery.trim()}" için sonuç bulunamadı.`
-                                    : 'Bu filtre için sonuç bulunamadı.'}
-                            </Text>
-                        </View>
+                        <EmptyState
+                            icon={searchingNow ? 'search-outline' : 'hourglass-outline'}
+                            title="Sonuç bulunamadı"
+                            subtitle={
+                                searchingNow
+                                    ? `"${debouncedQuery.trim()}" ile eşleşen haber yok. Tarih filtresini "Tümü" yapmayı dene.`
+                                    : 'Bu filtre için sonuç bulunamadı.'
+                            }
+                            actionLabel={searchingNow ? 'Aramayı temizle' : undefined}
+                            onAction={searchingNow ? () => setSearchQuery('') : undefined}
+                            accent={HN_ORANGE}
+                            colors={colors}
+                        />
                     ) : (
                         displayItems.map((item, idx: number) => (
                             <HNCard
@@ -444,6 +517,8 @@ export default function HNScreen({
         </View>
     )
 }
+
+export default memo(HNScreen)
 
 // ─── Styles ──────────────────────────────────────────────────────────────────
 

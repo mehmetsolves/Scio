@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { View, Text, ScrollView, Pressable, StyleSheet } from 'react-native'
 import type { ColorScheme } from '../theme/colors'
-import type { DownloadedArticle } from '../store/DownloadsContext'
+import { translatedLangOf, type DownloadedArticle } from '../store/DownloadsContext'
+import { getLanguage } from '../api/languages'
 
 const SERIF = 'SourceSerif4_400Regular'
 const SERIF_BOLD = 'SourceSerif4_700Bold'
@@ -20,7 +21,10 @@ export default function OfflineReaderScreen({
     onBack: () => void
     colors: ColorScheme
 }) {
-    const [lang, setLang] = useState<'orig' | 'tr'>(article.origLang === 'tr' ? 'orig' : 'tr')
+    // Kayıtlı çevirinin dili (sabit 'tr' değil; indirme anındaki global dil)
+    const trLang = getLanguage(translatedLangOf(article))
+    const origLang = getLanguage(article.origLang)
+    const [lang, setLang] = useState<'orig' | 'tr'>('tr')
     const [showSynopsis, setShowSynopsis] = useState(true)
 
     const isTrShown = lang === 'tr'
@@ -52,13 +56,13 @@ export default function OfflineReaderScreen({
                     <Pressable
                         onPress={toggleLang}
                         hitSlop={8}
-                        accessibilityLabel={isTrShown ? 'Orijinal dili göster' : 'Türkçe çeviriyi göster'}
+                        accessibilityLabel={isTrShown ? 'Orijinal dili göster' : `${trLang.label} çeviriyi göster`}
                         accessibilityRole="button"
                         style={[s.langChip, { backgroundColor: colors.burgundyTint }]}
                     >
-                        <Text style={{ fontSize: 13 }}>{isTrShown ? '🇬🇧' : '🇹🇷'}</Text>
+                        <Text style={{ fontSize: 13 }}>{isTrShown ? origLang.flag : trLang.flag}</Text>
                         <Text style={[s.langChipText, { color: colors.burgundy }]}>
-                            {isTrShown ? 'English' : 'Türkçe'}
+                            {isTrShown ? `Orijinal (${origLang.label})` : trLang.label}
                         </Text>
                     </Pressable>
                 </View>

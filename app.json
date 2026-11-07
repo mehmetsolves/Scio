@@ -6,9 +6,6 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
-    "splash": {
-      "backgroundColor": "#FAF7F2"
-    },
     "android": {
       "package": "com.scio.app",
       "versionCode": 1,
@@ -16,7 +13,9 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#FAF7F2"
       },
-      "permissions": ["INTERNET"]
+      "permissions": [
+        "INTERNET"
+      ]
     },
     "ios": {
       "bundleIdentifier": "com.scio.app",
@@ -25,7 +24,13 @@
     "plugins": [
       "expo-asset",
       "expo-secure-store",
-      "./plugins/adi-registration"
+      "./plugins/adi-registration",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#FAF7F2"
+        }
+      ]
     ],
     "extra": {
       "eas": {

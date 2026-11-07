@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { memo, useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from 'react'
 import {
     View,
     Text,
@@ -33,8 +33,13 @@ import { SavedArticlesProvider, useSavedArticles } from './src/store/SavedArticl
 import { lightColors, darkColors, SOURCE_META, type ColorScheme } from './src/theme/colors'
 import { searchArticles, translateText, summarizeText, type Article } from './src/api/client'
 import { fetchStoryIds, fetchItems, extractDomain, timeAgo, type HNItem } from './src/api/hn'
-import { fetchEvrimAgaciArticles, searchEvrimAgaci, formatEvrimDate, type EvrimAgaciArticle } from './src/api/evrimagaci'
-import { fetchAllNews, filterNews, formatNewsDate, getNewsSourceMeta, NEWS_SOURCES, FALLBACK_SOURCE_META, type NewsArticle } from './src/api/news'
+import { fetchEvrimAgaciArticles, searchEvrimAgaci, formatEvrimDate, EVRIM_CACHE_KEY, type EvrimAgaciArticle } from './src/api/evrimagaci'
+import { fetchAllNews, fetchBuiltinNews, filterNews, formatNewsDate, getNewsSourceMeta, NEWS_SOURCES, NEWS_CACHE_KEY, FALLBACK_SOURCE_META, type NewsArticle } from './src/api/news'
+import { prefetch } from './src/api/cache'
+import { getLanguage } from './src/api/languages'
+import { useContentTranslation } from './src/hooks/useContentTranslation'
+import LanguageToggle from './src/components/LanguageToggle'
+import SourcesScreen from './src/screens/SourcesScreen'
 import SettingsScreen from './src/screens/SettingsScreen'
 import SavedScreen from './src/screens/SavedScreen'
 import ProfileScreen from './src/screens/ProfileScreen'
@@ -53,8 +58,8 @@ import TopicsScreen from './src/screens/TopicsScreen'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-type Screen = 'discover' | 'results' | 'detail' | 'settings' | 'saved' | 'profile' | 'hn' | 'hnReader' | 'webview' | 'evrimagaci' | 'news' | 'offlineReader' | 'topics'
-type Lang = 'tr' | 'en'
+type Screen = 'discover' | 'results' | 'detail' | 'settings' | 'saved' | 'profile' | 'hn' | 'hnReader' | 'webview' | 'evrimagaci' | 'news' | 'offlineReader' | 'topics' | 'sources'
+
 
 // Alt bardaki dört sabit sekme. Kayıtlılar, Ayarlar ve Profil artık sekme
 // değil — hamburger menüden açılıyor (bkz. HamburgerMenu).
@@ -149,7 +154,7 @@ function ResultsScreen({
     query: string
     onBack: () => void
     onArticle: (a: Article) => void
-    onSearch: (q: string) => void
+    onSearch: (q: string, mode?: 'academic' | 'news') => void
     onOpenUrl: (url: string, title: string) => void
     colors: ColorScheme
     mode?: 'academic' | 'news'
@@ -195,14 +200,19 @@ function ResultsScreen({
                 .finally(() => {
                     if (!cancelled) setLoading(false)
                 })
-            return
+            return () => {
+                cancelled = true
+            }
         }
 
-        // Haber modunda: istemci tarafı filtre (RSS tam listesi çekilir)
-        fetchAllNews(undefined, { sources: [...NEWS_SOURCES, ...customSources] })
+        // Haber modunda: istemci tarafı filtre (RSS tam listesi çekilir).
+        // Önceki sorgunun sonuçları yeni arama sırasında görünmesin.
+        setNewsResults([])
+        const newsSources = [...NEWS_SOURCES, ...customSources]
+        fetchAllNews(undefined, { sources: newsSources })
             .then((all) => {
                 if (cancelled) return
-                setNewsResults(filterNews(all, query))
+                setNewsResults(filterNews(all, query, newsSources))
                 setHasMore(false)
             })
             .catch((err) => {
@@ -273,7 +283,9 @@ function ResultsScreen({
                             value={inputValue}
                             onChangeText={setInputValue}
                             onSubmitEditing={() => {
-                                if (inputValue.trim()) onSearch(inputValue.trim())
+                                // Mod korunur: haber aramasında yeniden arama yapınca
+                                // sessizce akademik aramaya geçiyordu.
+                                if (inputValue.trim()) onSearch(inputValue.trim(), mode)
                             }}
                             returnKeyType="search"
                             selectionColor={colors.burgundy}
@@ -439,17 +451,27 @@ function DetailScreen({
     onOpenUrl: (url: string, title: string) => void
     colors: ColorScheme
 }) {
-    const { engine, style, apiKey } = useSettings()
+    const { engine, apiKey } = useSettings()
     const { isSaved, toggleSave, updateTranslation } = useSavedArticles()
     const { downloadArticle, isDownloaded } = useDownloads()
 
-    // ── Translation state ──
-    const [lang, setLang] = useState<Lang>('en') // starts EN, auto-translates to TR
-    const [titleTr, setTitleTr] = useState<string | null>(null)
-    const [abstractTr, setAbstractTr] = useState<string | null>(null)
-    const [translating, setTranslating] = useState(false)
-    const [translateError, setTranslateError] = useState<string | null>(null)
+    // ── Translation ──
+    // Hedef dil global `targetLanguage`'dan (SettingsContext) gelir ve
+    // değiştiği an çeviri yeniden tetiklenir (bkz. useContentTranslation).
+    // Akademik makaleler İngilizce; kaynak dil 'en'.
+    const SOURCE_LANG = 'en'
+    const tr = useContentTranslation(article.id, { title: article.title, abstract: article.abstract }, { sourceLang: SOURCE_LANG })
+    const defaultLang = tr.targetLanguage
+    const targetLangs = tr.languages
+    const lang = tr.lang
+    const translatingLang = tr.translatingLang
+    const translating = translatingLang !== null
+    const translateError = tr.error
+    const translateTo = tr.translateTo
     const [downloading, setDownloading] = useState(false)
+    // Kayıtlılar'daki çeviri alanları (titleTr/abstractTr) Türkçe içindir
+    const titleTr = tr.cache.tr?.title ?? null
+    const abstractTr = tr.cache.tr?.abstract ?? null
 
     // ── Summary state ──
     const [summary, setSummary] = useState<string | null>(null)
@@ -459,52 +481,18 @@ function DetailScreen({
 
     const authorsStr = Array.isArray(article.authors) ? article.authors.join(', ') : String(article.authors)
 
-    // ── Auto-translate on mount ──
+    // Türkçe çeviri gelince, makale kayıtlıysa Kayıtlılar'daki kopyayı güncelle
     useEffect(() => {
-        let cancelled = false
-        setTranslating(true)
-        setTranslateError(null)
-
-        const opts = { style, engine, apiKey: apiKey || undefined }
-
-        Promise.all([
-            translateText(article.title, opts),
-            translateText(article.abstract, opts),
-        ])
-            .then(([tTitle, tAbstract]) => {
-                if (!cancelled) {
-                    setTitleTr(tTitle)
-                    setAbstractTr(tAbstract)
-                    setLang('tr')
-                    // Update translation cache if article is already saved
-                    if (isSaved(article.id)) {
-                        updateTranslation(article.id, tTitle, tAbstract)
-                    }
-                }
-            })
-            .catch((err) => {
-                if (!cancelled) setTranslateError(err.message || 'Çeviri başarısız')
-            })
-            .finally(() => {
-                if (!cancelled) setTranslating(false)
-            })
-
-        return () => {
-            cancelled = true
-        }
-    }, [article.id])
+        if (titleTr && abstractTr && isSaved(article.id)) updateTranslation(article.id, titleTr, abstractTr)
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [titleTr, abstractTr])
 
     // ── Current display values ──
-    const displayTitle = lang === 'tr' && titleTr ? titleTr : article.title
-    const displayAbstract = lang === 'tr' && abstractTr ? abstractTr : article.abstract
+    const displayTitle = tr.shown.title
+    const displayAbstract = tr.shown.abstract
 
-    const switchLang = () => {
-        if (lang === 'en' && !titleTr) {
-            // Translation hasn't completed yet
-            return
-        }
-        setLang((l) => (l === 'tr' ? 'en' : 'tr'))
-    }
+    // "Tekrar dene": gösterilen değilse hedef dile çevir
+    const fabTarget = tr.isTranslated ? 'orig' : defaultLang
 
     const handleSummarize = () => {
         if (engine === 'mymemory') {
@@ -516,7 +504,7 @@ function DetailScreen({
         }
         setSummarizing(true)
         setSummaryError(null)
-        summarizeText(article.abstract, { engine, apiKey: apiKey || undefined })
+        summarizeText(article.abstract, { engine, apiKey: apiKey || undefined, targetLang: defaultLang })
             .then((s) => {
                 setSummary(s)
                 setSummaryExpanded(true)
@@ -588,16 +576,69 @@ function DetailScreen({
 
             <ScrollView style={{ flex: 1 }}>
                 <View style={styles.detailBody}>
+                    {/* Dil seçici — ayarlarda birden fazla dil eklenmişse */}
+                    {targetLangs.length > 1 && (
+                        <ScrollView
+                            horizontal
+                            showsHorizontalScrollIndicator={false}
+                            style={{ marginBottom: 14 }}
+                            contentContainerStyle={{ gap: 8 }}
+                        >
+                            {['orig', ...targetLangs].map((code) => {
+                                const active = lang === code
+                                const busy = translatingLang === code
+                                const l = getLanguage(code === 'orig' ? SOURCE_LANG : code)
+                                return (
+                                    <Pressable
+                                        key={code}
+                                        onPress={() => !translating && translateTo(code)}
+                                        accessibilityRole="button"
+                                        accessibilityState={{ selected: active, busy }}
+                                        accessibilityLabel={code === 'orig' ? 'Orijinal metni göster' : `${l.label} çevirisini göster`}
+                                        style={[
+                                            styles.langChip,
+                                            active
+                                                ? { backgroundColor: colors.burgundy, borderColor: colors.burgundy }
+                                                : { borderColor: colors.inputBorder },
+                                        ]}
+                                    >
+                                        {busy ? (
+                                            <ActivityIndicator size="small" color={active ? '#FFFFFF' : colors.burgundy} />
+                                        ) : (
+                                            <Text style={{ fontSize: 12 }}>{l.flag}</Text>
+                                        )}
+                                        <Text style={[styles.langChipText, { color: active ? '#FFFFFF' : colors.muted }]}>
+                                            {code === 'orig' ? 'Orijinal' : l.label}
+                                        </Text>
+                                    </Pressable>
+                                )
+                            })}
+                        </ScrollView>
+                    )}
+
                     {/* Title */}
                     {translating ? (
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 14 }}>
                             <ActivityIndicator size="small" color={colors.burgundy} />
-                            <Text style={[styles.statusSubText, { color: colors.muted }]}>Çevriliyor...</Text>
+                            <Text style={[styles.statusSubText, { color: colors.muted }]}>
+                                {getLanguage(translatingLang!).label} diline çevriliyor...
+                            </Text>
                         </View>
                     ) : null}
                     <Text style={[styles.detailTitle, { color: colors.ink }]}>{displayTitle}</Text>
                     {translateError && (
-                        <Text style={[styles.errorText, { color: '#C0392B' }]}>Çeviri hatası: {translateError}</Text>
+                        <View style={[styles.translateErrorBox, { borderColor: '#E5B5AE', backgroundColor: colors.card }]}>
+                            <Text style={[styles.errorText, { color: '#C0392B', marginBottom: 0, flex: 1 }]}>
+                                Çeviri hatası: {translateError}
+                            </Text>
+                            <Pressable
+                                onPress={() => translateTo(fabTarget === 'orig' ? defaultLang : fabTarget)}
+                                hitSlop={8}
+                                accessibilityRole="button"
+                            >
+                                <Text style={[styles.linkText, { color: colors.burgundy, fontSize: 13 }]}>Tekrar dene</Text>
+                            </Pressable>
+                        </View>
                     )}
                     <Text style={[styles.detailAuthors, { color: colors.muted }]}>{authorsStr}</Text>
                     <Text style={[styles.detailYear, { color: colors.mutedLight }]}>{article.year}</Text>
@@ -606,7 +647,7 @@ function DetailScreen({
                     {/* Abstract */}
                     <View style={[styles.abstractBox, { backgroundColor: colors.abstractBg, borderColor: colors.border }]}>
                         <Text style={[styles.abstractLabel, { color: colors.burgundy }]}>
-                            {lang === 'tr' ? 'Özet' : 'Abstract'}
+                            {lang === 'orig' ? 'Abstract' : lang === 'tr' ? 'Özet' : `Abstract · ${getLanguage(lang).label}`}
                         </Text>
                         <Text style={[styles.abstractText, { color: colors.abstractText }]}>
                             {displayAbstract}
@@ -680,17 +721,16 @@ function DetailScreen({
             </ScrollView>
 
             {/* Language toggle FAB */}
-            <Pressable
-                onPress={switchLang}
-                disabled={translating && lang === 'en'}
-                accessibilityLabel={lang === 'tr' ? 'İngilizce göster' : 'Türkçe göster'}
-                accessibilityRole="button"
-                accessibilityState={{ disabled: translating && lang === 'en' }}
-                style={[styles.langToggle, { opacity: translating && lang === 'en' ? 0.5 : 1 }]}
-            >
-                <Text style={{ fontSize: 14 }}>{lang === 'tr' ? '🇬🇧' : '🇹🇷'}</Text>
-                <Text style={styles.langToggleText}>{lang === 'tr' ? 'English' : 'Türkçe'}</Text>
-            </Pressable>
+            {/* Çeviri sürerken buton yalnızca gösterge olur; hata varsa basınca
+                yeniden dener (eskiden sessizce hiçbir şey yapmıyordu). */}
+            {defaultLang !== SOURCE_LANG && (
+                <LanguageToggle
+                    showingTranslation={tr.isTranslated}
+                    targetLanguage={defaultLang}
+                    busy={translating}
+                    onPress={tr.toggle}
+                />
+            )}
         </View>
     )
 }
@@ -770,6 +810,20 @@ function TabBar({
 
 // ─── Inner App (needs SettingsContext) ────────────────────────────────────────
 
+// Sekme ekranları ilk ziyaretten sonra sökülmez, yalnızca gizlenir
+// (display: 'none'). Önceden her sekme değişiminde ekran sıfırdan kuruluyor,
+// tüm RSS/API istekleri baştan atılıyor ve bitene kadar ~1.5 sn spinner
+// görünüyordu. Artık geri dönüş anlık: state, kaydırma konumu ve arama
+// metni korunur. React.memo + sabit callback'ler sayesinde gizli sekmeler
+// başka bir ekrandaki state değişiminde yeniden render da almaz.
+const TabPane = memo(function TabPane({ visible, children }: { visible: boolean; children: ReactNode }) {
+    return (
+        <View style={visible ? styles.pane : styles.paneHidden} pointerEvents={visible ? 'auto' : 'none'}>
+            {children}
+        </View>
+    )
+})
+
 function AppInner() {
     const [fontsLoaded] = useFonts({
         SourceSerif4_400Regular,
@@ -791,14 +845,16 @@ function AppInner() {
     const [webviewUrl, setWebviewUrl] = useState('')
     const [webviewTitle, setWebviewTitle] = useState('')
 
-    // Makale/okucyucu ekranlarının geldiği sekme. Kayıtlılar'dan açılan bir
-    // makale kayıtlılara, Keşfet'ten açılan makale keşfete dönmeli. Eski
-    // prevTab/`prevTab === 'saved'` ifadesi bu ikisini birbirine karıştırıyordu.
-    const [detailOrigin, setDetailOrigin] = useState<Screen>('results')
+    // Detay/okuyucu ekranlarının açıldığı ekran — geri dönüş oraya yapılır.
+    // (Eskiden Keşfet'ten açılan makale geri tuşunda boş Sonuçlar ekranına
+    // dönüyordu; Kayıtlılar'dan açılan HN haberi Teknoloji'ye dönüyordu.)
+    const [detailOrigin, setDetailOrigin] = useState<Screen>(HOME_SCREEN)
+    const [hnOrigin, setHnOrigin] = useState<Screen>('hn')
+    const [offlineOrigin, setOfflineOrigin] = useState<Screen>('saved')
+    const [sourcesOrigin, setSourcesOrigin] = useState<Screen>(HOME_SCREEN)
 
     // Arama sonuçlarının hangi sekmeden açıldığı — geri dönüş oraya yapılır.
     const [searchOrigin, setSearchOrigin] = useState<Screen>('discover')
-    // Gündem araması yalnızca haber getirir; Keşfet araması yalnızca akademik.
     const [searchMode, setSearchMode] = useState<'academic' | 'news'>('academic')
 
     // Hamburger menünün açıldığı ekran — geri dönüş buraya yapılır.
@@ -808,15 +864,48 @@ function AppInner() {
     const [downloadedArticle, setDownloadedArticle] = useState<DownloadedArticle | null>(null)
     const [prevScreen, setPrevScreen] = useState<Screen>(HOME_SCREEN)
 
+    // Ziyaret edilmiş sekmeler (lazy mount: açılmamış sekme hiç kurulmaz)
+    const [mountedTabs, setMountedTabs] = useState<TabId[]>([HOME_SCREEN as TabId])
+
+    // Callback'lerin güncel ekranı okuması için ref: callback'ler böylece
+    // `screen`e bağımlı olmadan sabit kalır (memo'lu ekranlar render almaz).
+    const screenRef = useRef<Screen>(screen)
+    screenRef.current = screen
+
+    useEffect(() => {
+        if ((TAB_SCREENS as readonly Screen[]).includes(screen)) {
+            const tab = screen as TabId
+            setMountedTabs((prev) => (prev.includes(tab) ? prev : [...prev, tab]))
+        }
+    }, [screen])
+
+    // Açılış boyandıktan sonra diğer sekmelerin verisini arka planda ısıt:
+    // kullanıcı sekmeye ilk kez geçtiğinde bile içerik hazır olur.
+    useEffect(() => {
+        if (!ready || !hasCompletedOnboarding) return
+        // RN 0.88'de InteractionManager kaldırıldı; ilk boyamanın ve açılış
+        // animasyonunun bitmesi için kısa bir gecikme yeterli.
+        const timer = setTimeout(() => {
+            if (!hiddenTabs.includes('news')) prefetch(NEWS_CACHE_KEY, fetchBuiltinNews, { persist: true })
+            if (!hiddenTabs.includes('evrimagaci')) prefetch(EVRIM_CACHE_KEY, fetchEvrimAgaciArticles, { persist: true })
+        }, 1200)
+        return () => clearTimeout(timer)
+        // yalnızca açılışta
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [ready, hasCompletedOnboarding])
+
     const handleBack = useCallback(() => {
-        if (screen === 'webview') setScreen(prevScreen)
-        else if (screen === 'detail') setScreen(detailOrigin)
-        else if (screen === 'settings' || screen === 'saved' || screen === 'profile') setScreen(menuOrigin)
-        else if (screen === 'topics') setScreen('settings')
-        else if (screen === 'hnReader') setScreen('hn')
-        else if (screen === 'results') setScreen(searchOrigin)
+        const cur = screenRef.current
+        if (cur === 'webview') setScreen(prevScreen)
+        else if (cur === 'detail') setScreen(detailOrigin)
+        else if (cur === 'settings' || cur === 'saved' || cur === 'profile') setScreen(menuOrigin)
+        else if (cur === 'sources') setScreen(sourcesOrigin)
+        else if (cur === 'topics') setScreen('settings')
+        else if (cur === 'hnReader') setScreen(hnOrigin)
+        else if (cur === 'offlineReader') setScreen(offlineOrigin)
+        else if (cur === 'results') setScreen(searchOrigin)
         else setScreen(HOME_SCREEN)
-    }, [screen, detailOrigin, menuOrigin, prevScreen])
+    }, [detailOrigin, menuOrigin, prevScreen, sourcesOrigin, hnOrigin, offlineOrigin, searchOrigin])
 
     useEffect(() => {
         const onBackPress = () => {
@@ -835,64 +924,77 @@ function AppInner() {
         return () => sub.remove()
     }, [screen, handleBack, menuOpen])
 
-    // NOT: Bu hook, aşağıdaki `if (!fontsLoaded || !ready) return null` ve
-    // `if (!hasCompletedOnboarding) return (...)` erken çıkışlarından ÖNCE
-    // olmalı. Erken çıkıştan sonra bırakılırsa React "Rendered more hooks
-    // than during the previous render" hatası verir: ilk render'da hook
-    // hiç çalışmayıp, `ready` true olduktan sonra çalışmaya başlar.
+    // NOT: Tüm hook'lar aşağıdaki `if (!fontsLoaded || !ready) return null`
+    // ve onboarding erken çıkışlarından ÖNCE olmalı. Erken çıkıştan sonra
+    // bırakılırsa React "Rendered more hooks than during the previous render"
+    // hatası verir.
     const visibleTabs = useMemo<TabId[]>(
         () => TAB_SCREENS.filter((t) => !hiddenTabs.includes(t)),
         [hiddenTabs],
     )
 
-    if (!fontsLoaded || !ready) return null
-
-    const handleSearch = (q: string, mode: 'academic' | 'news' = 'academic') => {
+    const handleSearch = useCallback((q: string, mode: 'academic' | 'news' = 'academic') => {
         setQuery(q)
-        setSearchOrigin(screen)
+        // Sonuçlar ekranında yeniden arama yapılırsa geri dönüş yine asıl
+        // sekmeye olsun (Sonuçlar'a değil)
+        if (screenRef.current !== 'results') setSearchOrigin(screenRef.current)
         setSearchMode(mode)
         setScreen('results')
-    }
+    }, [])
 
-    const handleArticle = (a: Article) => {
+    const handleArticle = useCallback((a: Article) => {
         setArticle(a)
-        setDetailOrigin(screen === 'saved' ? 'saved' : 'results')
+        setDetailOrigin(screenRef.current)
         setScreen('detail')
-    }
+    }, [])
 
-    const openMenu = () => {
-        setMenuOrigin(screen)
+    const openMenu = useCallback(() => {
+        setMenuOrigin(screenRef.current)
         setMenuOpen(true)
-    }
+    }, [])
 
-    const handleHNItem = (item: HNItem) => {
+    const handleHNItem = useCallback((item: HNItem) => {
         setHnItem(item)
+        setHnOrigin(screenRef.current)
         setScreen('hnReader')
-    }
+    }, [])
 
-    const handleOpenUrl = (url: string, title: string) => {
-        setPrevScreen(screen)
+    const handleOpenUrl = useCallback((url: string, title: string) => {
+        setPrevScreen(screenRef.current)
         setWebviewUrl(url)
         setWebviewTitle(title)
         setScreen('webview')
-    }
+    }, [])
 
-    const handleOfflineReader = (item: DownloadedArticle) => {
+    const handleOfflineReader = useCallback((item: DownloadedArticle) => {
         setDownloadedArticle(item)
+        setOfflineOrigin(screenRef.current)
         setScreen('offlineReader')
-    }
+    }, [])
 
-    const handleTab = (tab: TabId) => {
+    const handleTab = useCallback((tab: TabId) => {
         setScreen(tab)
-    }
+    }, [])
 
-    // Hamburger menü öğeleri: Kayıtlılar, Ayarlar, Profil. Hepsi menünün
-    // açıldığı ekrana döner (menuOrigin), sekme olmadıkları için alt barda
-    // görünmezler.
-    const openFromMenu = (target: Screen) => {
+    const openTopics = useCallback(() => setScreen('topics'), [])
+
+    const openSources = useCallback(() => {
+        setSourcesOrigin(screenRef.current)
+        setScreen('sources')
+    }, [])
+
+    // Hamburger menü öğeleri: Kayıtlılar, Kaynaklarım, Ayarlar, Profil.
+    const openFromMenu = useCallback((target: Screen) => {
         setMenuOpen(false)
+        if (target === 'sources') {
+            setSourcesOrigin(screenRef.current)
+        }
         setScreen(target)
-    }
+    }, [])
+
+    const closeMenu = useCallback(() => setMenuOpen(false), [])
+
+    if (!fontsLoaded || !ready) return null
 
     // TypeScript `includes` ile değeri daraltmıyor, bu yüzden `screen` her
     // zaman `Screen` kalıyor. `showTab` doğruysa `screen` gerçekten bir sekme
@@ -912,13 +1014,42 @@ function AppInner() {
         )
     }
 
-    // Sekme ekranlarının her biri menü düğmesini kendi başlığına alıyor.
-    const openMenuFromTab = () => openMenu()
+    const renderTab = (tab: TabId) => {
+        switch (tab) {
+            case 'discover':
+                return (
+                    <DiscoverScreen
+                        colors={colors}
+                        onArticle={handleArticle}
+                        onOpenTopics={openTopics}
+                        onOpenMenu={openMenu}
+                        onOpenUrl={handleOpenUrl}
+                        onSearch={handleSearch}
+                    />
+                )
+            case 'hn':
+                return <HNScreen colors={colors} onItem={handleHNItem} onOpenMenu={openMenu} onOpenUrl={handleOpenUrl} />
+            case 'evrimagaci':
+                return <EvrimAgaciScreen colors={colors} onOpenUrl={handleOpenUrl} onOpenMenu={openMenu} />
+            case 'news':
+                return <NewsScreen colors={colors} onOpenUrl={handleOpenUrl} onSearch={handleSearch} onOpenMenu={openMenu} />
+        }
+    }
 
     return (
         <SafeAreaProvider>
             <SafeAreaView style={{ flex: 1, backgroundColor: colors.cream }} edges={['top', 'bottom']}>
                 <StatusBar style={darkMode ? 'light' : 'dark'} />
+
+                {/* Sekmeler: bir kez kurulur, sonra yalnızca gizlenir/gösterilir */}
+                <View style={showTab ? styles.pane : styles.paneHidden}>
+                    {mountedTabs.map((tab) => (
+                        <TabPane key={tab} visible={screen === tab}>
+                            {renderTab(tab)}
+                        </TabPane>
+                    ))}
+                </View>
+
                 {screen === 'results' && (
                     <ResultsScreen
                         query={query}
@@ -933,49 +1064,41 @@ function AppInner() {
                 {screen === 'detail' && article && (
                     <DetailScreen article={article} onBack={handleBack} onOpenUrl={handleOpenUrl} colors={colors} />
                 )}
-                {screen === 'discover' && (
-                    <DiscoverScreen
-                        colors={colors}
-                        onArticle={handleArticle}
-                        onOpenTopics={() => { setScreen('topics') }}
-                        onOpenMenu={openMenuFromTab}
-                    />
-                )}
-                {screen === 'hn' && <HNScreen colors={colors} onItem={handleHNItem} onOpenMenu={openMenuFromTab} />}
                 {screen === 'hnReader' && hnItem && (
                     <HNReaderScreen item={hnItem} onBack={handleBack} colors={colors} />
-                )}
-                {screen === 'evrimagaci' && (
-                    <EvrimAgaciScreen colors={colors} onOpenUrl={handleOpenUrl} onOpenMenu={openMenuFromTab} />
-                )}
-                {screen === 'news' && (
-                    <NewsScreen
-                        colors={colors}
-                        onOpenUrl={handleOpenUrl}
-                        onSearch={handleSearch}
-                        onOpenMenu={openMenuFromTab}
-                    />
                 )}
                 {screen === 'webview' && webviewUrl && (
                     <ArticleWebViewScreen url={webviewUrl} title={webviewTitle} onBack={handleBack} colors={colors} />
                 )}
                 {screen === 'settings' && (
-                    <SettingsScreen colors={colors} onBack={handleBack} onOpenTopics={() => setScreen('topics')} />
+                    <SettingsScreen
+                        colors={colors}
+                        onBack={handleBack}
+                        onOpenTopics={openTopics}
+                        onOpenSources={openSources}
+                    />
+                )}
+                {screen === 'sources' && (
+                    <SourcesScreen colors={colors} onBack={handleBack} onOpenUrl={handleOpenUrl} />
                 )}
                 {screen === 'topics' && <TopicsScreen colors={colors} onBack={handleBack} />}
-                {screen === 'saved' && <SavedScreen colors={colors} onArticle={handleArticle} onHNItem={handleHNItem} onOpenUrl={handleOpenUrl} onOfflineArticle={handleOfflineReader} />}
+                {screen === 'saved' && (
+                    <SavedScreen
+                        colors={colors}
+                        onBack={handleBack}
+                        onArticle={handleArticle}
+                        onHNItem={handleHNItem}
+                        onOpenUrl={handleOpenUrl}
+                        onOfflineArticle={handleOfflineReader}
+                    />
+                )}
                 {screen === 'profile' && <ProfileScreen colors={colors} onBack={handleBack} />}
                 {screen === 'offlineReader' && downloadedArticle && (
                     <OfflineReaderScreen article={downloadedArticle} onBack={handleBack} colors={colors} />
                 )}
                 {showTab && <TabBar active={activeTab} onTab={handleTab} visibleTabs={visibleTabs} colors={colors} />}
 
-                <HamburgerMenu
-                    colors={colors}
-                    open={menuOpen}
-                    onClose={() => setMenuOpen(false)}
-                    onSelect={openFromMenu}
-                />
+                <HamburgerMenu colors={colors} open={menuOpen} onClose={closeMenu} onSelect={openFromMenu} />
             </SafeAreaView>
         </SafeAreaProvider>
     )
@@ -1000,6 +1123,8 @@ export default function App() {
 // ─── Styles ──────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
+    pane: { flex: 1 },
+    paneHidden: { display: 'none' },
     row: { flexDirection: 'row', alignItems: 'center', gap: 10 },
     badge: {
         alignSelf: 'flex-start',
@@ -1158,6 +1283,28 @@ const styles = StyleSheet.create({
         fontFamily: SANS_SEMIBOLD,
         fontSize: 13,
         textDecorationLine: 'underline',
+    },
+    langChip: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 5,
+        borderWidth: 1,
+        borderRadius: 16,
+        paddingHorizontal: 11,
+        paddingVertical: 6,
+    },
+    langChipText: {
+        fontFamily: SANS_SEMIBOLD,
+        fontSize: 12,
+    },
+    translateErrorBox: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
+        borderWidth: 1,
+        borderRadius: 8,
+        padding: 10,
+        marginBottom: 12,
     },
     langToggle: {
         position: 'absolute',
